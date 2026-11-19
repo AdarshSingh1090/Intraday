@@ -85,6 +85,17 @@ def calculate_metrics(trades, starting_equity=8900.0):
 def backtest(df, symbol="UNKNOWN", config=None, strategy_config=None):
     """Walk forward: signal uses bars through t; fill/simulation uses t+1 onward."""
     config = config or BacktestConfig()
+    if (not isinstance(config.interval_minutes, int) or config.interval_minutes <= 0
+            or not isinstance(config.warmup_bars, int) or config.warmup_bars < 1
+            or not math.isfinite(float(config.budget)) or config.budget <= 0
+            or not 0 < config.risk_per_trade_pct <= 100
+            or not 0 < config.max_capital_per_trade_pct <= 100
+            or not 0 < config.max_portfolio_exposure_pct <= 100
+            or not 0 < config.daily_loss_limit_pct <= 100
+            or config.max_trades_per_day < 1
+            or any(not math.isfinite(float(x)) or float(x) < 0 for x in
+                   (config.slippage_bps_per_side, config.fee_rate_per_side, config.flat_fee_per_side))):
+        return {"status": "REJECTED", "reason": "Invalid backtest configuration.", "trades": [], "metrics": _empty_metrics(config.budget if math.isfinite(float(config.budget)) and config.budget > 0 else 0.0), "paper_only": True}
     if not isinstance(df, pd.DataFrame) or df.empty:
         return {"status": "REJECTED", "reason": "No historical candles provided.", "trades": [], "metrics": _empty_metrics(config.budget), "paper_only": True}
     required = {"timestamp", "open", "high", "low", "close", "volume"}
@@ -102,11 +113,11 @@ def backtest(df, symbol="UNKNOWN", config=None, strategy_config=None):
     o, h, l, cl = (bars[col] for col in ("open", "high", "low", "close"))
     invalid_ohlc = (h < bars[["open", "close", "low"]].max(axis=1)) | (l > bars[["open", "close"]].min(axis=1))
     if invalid_ohlc.any():
-        return {"status": "REJECTED", "reason": "Historical candles contain inconsistent OHLC relationships.", "trades": [], "metrics": _empty_metrics(), "paper_only": True}
+        return {"status": "REJECTED", "reason": "Historical candles contain inconsistent OHLC relationships.", "trades": [], "metrics": _empty_metrics(config.budget), "paper_only": True}
     if len(bars) <= config.warmup_bars + 1:
-        return {"status": "REJECTED", "reason": "Insufficient candles for warm-up and forward simulation.", "trades": [], "metrics": _empty_metrics(), "paper_only": True}
+        return {"status": "REJECTED", "reason": "Insufficient candles for warm-up and forward simulation.", "trades": [], "metrics": _empty_metrics(config.budget), "paper_only": True}
     if (bars[["open", "high", "low", "close"]] <= 0).any().any() or (bars["volume"] < 0).any():
-        return {"status": "REJECTED", "reason": "Historical candles contain invalid prices or negative volume.", "trades": [], "metrics": _empty_metrics(), "paper_only": True}
+        return {"status": "REJECTED", "reason": "Historical candles contain invalid prices or negative volume.", "trades": [], "metrics": _empty_metrics(config.budget), "paper_only": True}
 
     trades, skipped = [], []
     daily_pnl, daily_count = {}, {}
