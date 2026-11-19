@@ -89,6 +89,14 @@ class PaperSimulatorTests(unittest.TestCase):
         self.assertGreater(result["estimated_stop_risk"],0)
         self.assertIsNotNone(result["r_multiple_net"])
 
+    def test_gap_reducing_reward_risk_is_rejected(self):
+        candidate=c()
+        candidate["risk_budget"]=1000
+        candidate["minimum_reward_risk_ratio"]=2.0
+        result=simulate_candidate(candidate,bars([["09:20",101,102,100,101,1000]]),SimulationConfig(0,0,0))
+        self.assertEqual(result["status"],"REJECTED")
+        self.assertIn("reward-risk below minimum",result["reason"])
+
     def test_actual_entry_capital_limit(self):
         candidate=c()
         candidate["max_capital"]=1000
