@@ -55,7 +55,7 @@ class BacktesterTests(unittest.TestCase):
              patch("market_intelligence.backtester.assess_candidate", return_value=fake_risk), \
              patch("market_intelligence.backtester.simulate_candidate", return_value=fake_sim) as sim:
             result=backtest(data,config=BacktestConfig(warmup_bars=60))
-            args=sim.call_args.args
+            args=sim.call_args_list[0].args
             forward=args[1]
             self.assertGreater(pd.to_datetime(forward.iloc[0].timestamp),pd.to_datetime(fake_candidate["signal_timestamp"]))
             self.assertEqual(pd.to_datetime(forward.iloc[0].timestamp),pd.to_datetime(data.iloc[61].timestamp))
