@@ -118,7 +118,7 @@ def generate_setup(evaluation, config=None):
 
     if score < config.minimum_score:
         return _no_trade("NO_SETUP", ["Setup score below threshold.", *failed],
-                        {"direction": direction, "score": score, "confidence": confidence,\n        "confidence_type": "rule_score_percentage_not_probability",
+                        {"direction": direction, "score": score, "confidence": confidence
                          "passed_checks": reasons, "failed_checks": failed})
 
     entry_reference = close
