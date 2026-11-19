@@ -19,6 +19,8 @@ from market_intelligence.quality_gate import assess_candles, print_quality_repor
 from market_intelligence.evaluation import evaluate_market_data
 from market_intelligence.strategy import generate_setup, StrategyConfig
 from market_intelligence.risk import assess_candidate, RiskConfig
+from market_intelligence.paper_simulator import simulate_candidate, SimulationConfig, PaperTradeStore
+import json
 
 
 # =========================================================
@@ -419,6 +421,54 @@ def cmd_risk(args):
 
 
 # =========================================================
+# PAPER SIMULATION (NO EXECUTION)
+# =========================================================
+
+def cmd_paper_sim(args):
+    candidate_data = json.loads(Path(args.candidate_json).read_text(encoding="utf-8"))
+    if candidate_data.get("approved") is not True:
+        raise SystemExit("Refusing simulation: candidate JSON must contain approved=true from risk assessment.")
+    if candidate_data.get("quantity", 0) <= 0:
+        raise SystemExit("Refusing simulation: approved quantity must be positive.")
+    forward = pd.read_csv(args.forward_csv)
+    result = simulate_candidate(
+        candidate_data,
+        forward,
+        SimulationConfig(
+            slippage_bps_per_side=args.slippage_bps,
+            fee_rate_per_side=args.fee_rate,
+            flat_fee_per_side=args.flat_fee,
+        ),
+    )
+    print("\n" + "=" * 58)
+    print("            PAPER TRADE SIMULATION")
+    print("=" * 58)
+    for key in ("status", "symbol", "direction", "quantity", "entry_timestamp",
+                "entry_reference_price", "entry_fill_price", "stop_loss", "target",
+                "exit_timestamp", "exit_fill_price", "exit_reason", "gross_pnl",
+                "estimated_fees", "net_pnl", "return_on_entry_capital_pct"):
+        if key in result:
+            print(f"{key}: {result[key]}")
+    if result.get("status") == "SIMULATED" and not args.no_save:
+        trade_id = PaperTradeStore(str(DB)).save(result)
+        print(f"Saved paper trade record: #{trade_id}")
+    if result.get("cost_model_note"):
+        print(result["cost_model_note"])
+    print("PAPER ONLY | NO BROKER ORDERS")
+    print("=" * 58)
+
+
+def cmd_paper_trades(args):
+    trades = PaperTradeStore(str(DB)).read_all()
+    if trades.empty:
+        print("No paper simulation records yet.")
+        return
+    print(trades[["id", "symbol", "direction", "quantity", "entry_fill_price",
+                  "exit_fill_price", "exit_reason", "net_pnl"]].to_string(index=False))
+    print(f"Total simulated net P&L: {trades['net_pnl'].sum():.2f}")
+
+
+# =========================================================
 # DATABASE STATUS
 # =========================================================
 
@@ -774,6 +824,25 @@ def build_parser():
     rk.add_argument("--long-only", action="store_true")
     rk.add_argument("--require-approved", action="store_true")
     rk.set_defaults(func=cmd_risk)
+
+    # -----------------------------------------------------
+    # PAPER SIMULATOR
+    # -----------------------------------------------------
+
+    ps = sub.add_parser("paper-sim")
+    ps.add_argument("--candidate-json", required=True,
+                    help="JSON containing approved risk assessment fields.")
+    ps.add_argument("--forward-csv", required=True,
+                    help="Forward candles with timestamp, open, high, low, close, volume.")
+    ps.add_argument("--slippage-bps", type=float, default=5.0)
+    ps.add_argument("--fee-rate", type=float, default=0.0003,
+                    help="Estimated fee rate per side.")
+    ps.add_argument("--flat-fee", type=float, default=0.0)
+    ps.add_argument("--no-save", action="store_true")
+    ps.set_defaults(func=cmd_paper_sim)
+
+    pt = sub.add_parser("paper-trades")
+    pt.set_defaults(func=cmd_paper_trades)
 
     # -----------------------------------------------------
     # STATUS
