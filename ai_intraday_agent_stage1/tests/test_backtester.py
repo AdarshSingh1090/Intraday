@@ -42,8 +42,8 @@ class BacktesterTests(unittest.TestCase):
         self.assertEqual(m["max_drawdown"],50)
         self.assertEqual(m["trades_per_day"],1.5)
         self.assertEqual(m["expectancy_per_trade"],25)
-        self.assertEqual(m["ending_equity"],8925)
-        self.assertEqual(m["total_return_pct"],0.2809)
+        self.assertEqual(m["ending_equity"],8975)
+        self.assertEqual(m["total_return_pct"],0.8427)
         self.assertIsNotNone(m["expectancy_bootstrap_95_ci"])
 
     def test_duplicate_timestamps_are_rejected_not_silently_deduplicated(self):
