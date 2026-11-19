@@ -118,7 +118,8 @@ def generate_setup(evaluation, config=None):
 
     if score < config.minimum_score:
         return _no_trade("NO_SETUP", ["Setup score below threshold.", *failed],
-                        {"direction": direction, "score": score, "confidence": confidence,\n                         "passed_checks": reasons, "failed_checks": failed})
+                        {"direction": direction, "score": score, "confidence": confidence,
+                         "passed_checks": reasons, "failed_checks": failed})
 
     entry_reference = close
     stop_distance = atr * config.atr_stop_multiplier
@@ -155,6 +156,7 @@ def generate_setup(evaluation, config=None):
         "score": score,
         "score_max": len(checks),
         "confidence": confidence,
+        "confidence_type": "rule_score_percentage_not_probability",
         "entry_note": "Close is a reference only; no simulated fill is assumed.",
     }
     return {
@@ -164,6 +166,7 @@ def generate_setup(evaluation, config=None):
         "score": score,
         "score_max": len(checks),
         "confidence": confidence,
+        "confidence_type": "rule_score_percentage_not_probability",
         "reasons": reasons,
         "diagnostics": {"failed_checks": failed},
         "paper_only": True,
