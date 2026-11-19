@@ -422,6 +422,59 @@ def cmd_risk(args):
 
 
 # =========================================================
+# HISTORICAL BACKTEST (RESEARCH ONLY)
+# =========================================================
+
+def cmd_backtest(args):
+    historical = pd.read_csv(args.file)
+    cfg = BacktestConfig(
+        interval_minutes=args.interval,
+        warmup_bars=args.warmup_bars,
+        budget=args.budget,
+        max_trades_per_day=args.max_trades_per_day,
+        daily_loss_limit_pct=args.daily_loss_limit_pct,
+        risk_per_trade_pct=args.risk_per_trade_pct,
+        max_capital_per_trade_pct=args.max_capital_per_trade_pct,
+        max_portfolio_exposure_pct=args.max_portfolio_exposure_pct,
+        slippage_bps_per_side=args.slippage_bps,
+        fee_rate_per_side=args.fee_rate,
+        flat_fee_per_side=args.flat_fee,
+        long_only=args.long_only,
+    )
+    result = backtest(historical, symbol=args.symbol, config=cfg)
+    print("\\n" + "=" * 68)
+    print("          HISTORICAL BACKTEST — RESEARCH / PAPER ONLY")
+    print("=" * 68)
+    print(f"Status: {result.get('status')}")
+    if result.get("reason"):
+        print(f"Reason: {result['reason']}")
+    print(f"Symbol: {args.symbol}")
+    metrics = result.get("metrics", {})
+    for key in ("trades", "win_rate_pct", "profit_factor", "gross_pnl",
+                "estimated_fees", "net_pnl", "expectancy_per_trade",
+                "total_return_pct", "ending_equity", "max_drawdown",
+                "max_drawdown_pct", "average_r_multiple_net",
+                "daily_sharpe_annualized", "daily_sortino_annualized"):
+        if key in metrics:
+            print(f"{key}: {metrics[key]}")
+    print(f"Skipped candidate setups: {len(result.get('skipped', []))}")
+    print("Paper-only: YES | Broker execution: NONE")
+    print("=" * 68)
+    if args.report_json:
+        out = Path(args.report_json)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(result, indent=2, default=str, allow_nan=False), encoding="utf-8")
+        print(f"Report JSON saved: {out}")
+    if args.trades_csv:
+        out = Path(args.trades_csv)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(result.get("trades", [])).to_csv(out, index=False)
+        print(f"Trades CSV saved: {out}")
+    if args.require_trades and not result.get("trades"):
+        raise SystemExit(2)
+
+
+# =========================================================
 # PAPER SIMULATION (NO EXECUTION)
 # =========================================================
 
@@ -825,6 +878,30 @@ def build_parser():
     rk.add_argument("--long-only", action="store_true")
     rk.add_argument("--require-approved", action="store_true")
     rk.set_defaults(func=cmd_risk)
+
+    # -----------------------------------------------------
+    # HISTORICAL BACKTEST (RESEARCH ONLY)
+    # -----------------------------------------------------
+
+    bt = sub.add_parser("backtest")
+    bt.add_argument("--file", required=True, help="Historical OHLCV CSV.")
+    bt.add_argument("--symbol", required=True)
+    bt.add_argument("--interval", type=int, default=5)
+    bt.add_argument("--warmup-bars", type=int, default=60)
+    bt.add_argument("--budget", type=float, default=8900.0)
+    bt.add_argument("--max-trades-per-day", type=int, default=3)
+    bt.add_argument("--daily-loss-limit-pct", type=float, default=2.0)
+    bt.add_argument("--risk-per-trade-pct", type=float, default=0.5)
+    bt.add_argument("--max-capital-per-trade-pct", type=float, default=35.0)
+    bt.add_argument("--max-portfolio-exposure-pct", type=float, default=70.0)
+    bt.add_argument("--slippage-bps", type=float, default=5.0)
+    bt.add_argument("--fee-rate", type=float, default=0.0003)
+    bt.add_argument("--flat-fee", type=float, default=0.0)
+    bt.add_argument("--long-only", action="store_true")
+    bt.add_argument("--report-json", help="Optional output path for complete JSON report.")
+    bt.add_argument("--trades-csv", help="Optional output path for simulated trades CSV.")
+    bt.add_argument("--require-trades", action="store_true", help="Exit with code 2 if no trades are produced.")
+    bt.set_defaults(func=cmd_backtest)
 
     # -----------------------------------------------------
     # PAPER SIMULATOR
