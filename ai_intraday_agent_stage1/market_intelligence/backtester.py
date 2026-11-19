@@ -28,6 +28,9 @@ class BacktestConfig:
     long_only: bool = False
     start_date: str | None = None
     end_date: str | None = None
+    market_timezone: str = "Asia/Kolkata"
+    session_start: str = "09:15"
+    session_end: str = "15:30"
 
 
 def _empty_metrics(starting_equity=0.0):
@@ -100,6 +103,8 @@ def backtest(df, symbol="UNKNOWN", config=None, strategy_config=None):
             and all(math.isfinite(x) and 0 < x <= 100 for x in numeric_limits)
             and isinstance(config.max_trades_per_day, int) and config.max_trades_per_day >= 1
             and all(math.isfinite(x) and x >= 0 for x in numeric_costs)
+            and bool(config.market_timezone)
+            and pd.to_datetime("2000-01-01 " + config.session_start) < pd.to_datetime("2000-01-01 " + config.session_end)
         )
     except (TypeError, ValueError, OverflowError):
         valid_config = False
@@ -113,6 +118,13 @@ def backtest(df, symbol="UNKNOWN", config=None, strategy_config=None):
         return {"status": "REJECTED", "reason": "Historical data missing required OHLCV columns.", "trades": [], "metrics": _empty_metrics(config.budget), "paper_only": True}
     bars = df.copy()
     bars["timestamp"] = pd.to_datetime(bars["timestamp"], errors="coerce")
+    try:
+        if bars["timestamp"].dt.tz is None:
+            bars["timestamp"] = bars["timestamp"].dt.tz_localize(config.market_timezone)
+        else:
+            bars["timestamp"] = bars["timestamp"].dt.tz_convert(config.market_timezone)
+    except (TypeError, ValueError):
+        return {"status": "REJECTED", "reason": "Historical timestamps could not be normalized to configured market timezone.", "trades": [], "metrics": _empty_metrics(config.budget), "paper_only": True}
     for col in ("open", "high", "low", "close", "volume"):
         bars[col] = pd.to_numeric(bars[col], errors="coerce")
     if bars[list(required)].isna().any().any():
@@ -120,6 +132,13 @@ def backtest(df, symbol="UNKNOWN", config=None, strategy_config=None):
     if bars["timestamp"].duplicated().any():
         return {"status": "REJECTED", "reason": "Historical candles contain duplicate timestamps.", "trades": [], "metrics": _empty_metrics(config.budget), "paper_only": True}
     bars = bars.sort_values("timestamp").reset_index(drop=True)
+    session_start = pd.to_datetime(config.session_start).time()
+    session_end = pd.to_datetime(config.session_end).time()
+    in_session = bars["timestamp"].dt.time.map(lambda t: session_start <= t < session_end)
+    excluded_out_of_session = int((~in_session).sum())
+    bars = bars.loc[in_session].reset_index(drop=True)
+    if bars.empty:
+        return {"status": "REJECTED", "reason": "No candles remain inside configured regular market session.", "trades": [], "metrics": _empty_metrics(config.budget), "paper_only": True}
     o, h, l, cl = (bars[col] for col in ("open", "high", "low", "close"))
     invalid_ohlc = (h < bars[["open", "close", "low"]].max(axis=1)) | (l > bars[["open", "close"]].min(axis=1))
     if invalid_ohlc.any():
@@ -139,7 +158,7 @@ def backtest(df, symbol="UNKNOWN", config=None, strategy_config=None):
     trades, skipped = [], []
     daily_pnl, daily_count = {}, {}
     i = config.warmup_bars
-    sim_config = SimulationConfig(config.slippage_bps_per_side, config.fee_rate_per_side, config.flat_fee_per_side)
+    sim_config = SimulationConfig(config.slippage_bps_per_side, config.fee_rate_per_side, config.flat_fee_per_side, config.market_timezone)
     strat_config = strategy_config or StrategyConfig(allow_short=not config.long_only)
     while i < len(bars) - 1:
         signal_bar = bars.iloc[i]
@@ -222,6 +241,9 @@ def backtest(df, symbol="UNKNOWN", config=None, strategy_config=None):
             starting_equity=config.budget, bootstrap_iterations=0,
         ),
         "benchmarks": benchmarks,
+        "excluded_out_of_session_bars": excluded_out_of_session,
+        "market_timezone": config.market_timezone,
+        "session": {"start": config.session_start, "end_exclusive": config.session_end},
         "paper_only": True,
         "execution": "none",
         "disclaimer": "Historical simulation only. Results are not predictive; estimated costs and candle-based fills may differ from real execution.",
