@@ -349,7 +349,7 @@ def cmd_strategy(args):
         return
     evaluation = evaluate_market_data(df, interval_minutes=args.interval, symbol=args.symbol)
     setup = generate_setup(evaluation, StrategyConfig(allow_short=not args.long_only))
-    print("\\n" + "=" * 58)
+    print("\n" + "=" * 58)
     print("        PAPER STRATEGY CANDIDATE")
     print("=" * 58)
     print(f"Symbol: {args.symbol}")
@@ -361,19 +361,18 @@ def cmd_strategy(args):
     for reason in setup['reasons']:
         print(f"+ {reason}")
     if setup['candidate']:
-        print("\\nCandidate (NOT an order):")
+        print("\nCandidate (NOT an order):")
         for key, value in setup['candidate'].items():
             print(f"{key}: {value}")
     if setup['diagnostics'].get('failed_checks'):
-        print("\\nFailed checks:")
+        print("\nFailed checks:")
         for reason in setup['diagnostics']['failed_checks']:
             print(f"- {reason}")
-    if setup['blocking_reasons'] if 'blocking_reasons' in setup else setup.get('reasons'):
-        if setup['status'] == 'BLOCKED':
-            print("\\nBlocking reasons:")
-            for reason in setup['reasons']:
-                print(f"- {reason}")
-    print("\\nPaper-only: YES | Execution: NONE")
+    if setup['status'] == 'BLOCKED':
+        print("\nBlocking reasons:")
+        for reason in setup['reasons']:
+            print(f"- {reason}")
+    print("\nPaper-only: YES | Execution: NONE")
     print("=" * 58)
     if args.require_candidate and setup['status'] != 'CANDIDATE':
         raise SystemExit(2)
