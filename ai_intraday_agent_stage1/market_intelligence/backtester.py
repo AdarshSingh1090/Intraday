@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import math
 import pandas as pd
 
-from market_intelligence.performance import evaluate_performance
+from market_intelligence.performance import evaluate_performance, segment_performance
 from market_intelligence.evaluation import evaluate_market_data
 from market_intelligence.strategy import generate_setup, StrategyConfig
 from market_intelligence.risk import assess_candidate, RiskConfig
@@ -204,6 +204,7 @@ def backtest(df, symbol="UNKNOWN", config=None, strategy_config=None):
         "trades": trades,
         "skipped": skipped,
         "metrics": calculate_metrics(trades, starting_equity=config.budget),
+        "segments": segment_performance(trades, starting_equity=config.budget),
         "paper_only": True,
         "execution": "none",
         "disclaimer": "Historical simulation only. Results are not predictive; estimated costs and candle-based fills may differ from real execution.",
