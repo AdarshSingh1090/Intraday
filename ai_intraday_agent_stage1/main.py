@@ -17,6 +17,7 @@ from data_validation import validate
 from database.store import CandleStore
 from market_intelligence.quality_gate import assess_candles, print_quality_report
 from market_intelligence.evaluation import evaluate_market_data
+from market_intelligence.strategy import generate_setup, StrategyConfig
 
 
 # =========================================================
@@ -307,7 +308,7 @@ def cmd_evaluate(args):
     if df.empty:
         print(f"No data found for {args.symbol} at {args.interval}-minute interval.")
         return
-    result = evaluate_market_data(df, interval_minutes=args.interval)
+    result = evaluate_market_data(df, interval_minutes=args.interval, symbol=args.symbol)
     print("\n" + "=" * 58)
     print("       DATA-GATED MARKET EVALUATION")
     print("=" * 58)
@@ -333,6 +334,48 @@ def cmd_evaluate(args):
     print("\\n" + result.get('warning', ''))
     print("=" * 58)
     if args.require_eligible and not result['trade_eligible']:
+        raise SystemExit(2)
+
+
+# =========================================================
+# STRATEGY EVALUATION (PAPER CANDIDATE ONLY)
+# =========================================================
+
+def cmd_strategy(args):
+    store = CandleStore(str(DB))
+    df = store.read(args.symbol, args.interval)
+    if df.empty:
+        print(f"No data found for {args.symbol} at {args.interval}-minute interval.")
+        return
+    evaluation = evaluate_market_data(df, interval_minutes=args.interval, symbol=args.symbol)
+    setup = generate_setup(evaluation, StrategyConfig(allow_short=not args.long_only))
+    print("\\n" + "=" * 58)
+    print("        PAPER STRATEGY CANDIDATE")
+    print("=" * 58)
+    print(f"Symbol: {args.symbol}")
+    print(f"Interval: {args.interval} minute(s)")
+    print(f"Status: {setup['status']}")
+    print(f"Signal: {setup['signal']}")
+    print(f"Score: {setup['score']}/{setup['score_max']}")
+    print(f"Confidence (rule score): {setup['confidence']}%")
+    for reason in setup['reasons']:
+        print(f"+ {reason}")
+    if setup['candidate']:
+        print("\\nCandidate (NOT an order):")
+        for key, value in setup['candidate'].items():
+            print(f"{key}: {value}")
+    if setup['diagnostics'].get('failed_checks'):
+        print("\\nFailed checks:")
+        for reason in setup['diagnostics']['failed_checks']:
+            print(f"- {reason}")
+    if setup['blocking_reasons'] if 'blocking_reasons' in setup else setup.get('reasons'):
+        if setup['status'] == 'BLOCKED':
+            print("\\nBlocking reasons:")
+            for reason in setup['reasons']:
+                print(f"- {reason}")
+    print("\\nPaper-only: YES | Execution: NONE")
+    print("=" * 58)
+    if args.require_candidate and setup['status'] != 'CANDIDATE':
         raise SystemExit(2)
 
 
@@ -661,6 +704,19 @@ def build_parser():
     ev.add_argument("--require-eligible", action="store_true",
                     help="Exit with code 2 when quality gate blocks.")
     ev.set_defaults(func=cmd_evaluate)
+
+    # -----------------------------------------------------
+    # STRATEGY
+    # -----------------------------------------------------
+
+    st = sub.add_parser("strategy")
+    st.add_argument("--symbol", required=True)
+    st.add_argument("--interval", type=int, required=True)
+    st.add_argument("--long-only", action="store_true",
+                    help="Disable short setup candidates.")
+    st.add_argument("--require-candidate", action="store_true",
+                    help="Exit with code 2 when no candidate is produced.")
+    st.set_defaults(func=cmd_strategy)
 
     # -----------------------------------------------------
     # STATUS
