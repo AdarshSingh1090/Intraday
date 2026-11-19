@@ -27,7 +27,7 @@ class BacktestConfig:
     long_only: bool = False
 
 
-def _empty_metrics():
+def _empty_metrics(starting_equity=0.0):
     return {
         "trades": 0, "wins": 0, "losses": 0, "win_rate_pct": 0.0,
         "gross_pnl": 0.0, "estimated_fees": 0.0, "net_pnl": 0.0,
@@ -35,7 +35,7 @@ def _empty_metrics():
         "max_drawdown": 0.0, "trades_per_day": 0.0,
         "expectancy_per_trade": 0.0, "median_trade_pnl": 0.0,
         "max_drawdown_pct": 0.0, "total_return_pct": 0.0,
-        "ending_equity": 0.0, "average_r_multiple_net": None,
+        "ending_equity": round(float(starting_equity), 2), "starting_equity": round(float(starting_equity), 2), "average_r_multiple_net": None,
         "expectancy_bootstrap_95_ci": None,
     }
 
@@ -86,16 +86,16 @@ def backtest(df, symbol="UNKNOWN", config=None, strategy_config=None):
     """Walk forward: signal uses bars through t; fill/simulation uses t+1 onward."""
     config = config or BacktestConfig()
     if not isinstance(df, pd.DataFrame) or df.empty:
-        return {"status": "REJECTED", "reason": "No historical candles provided.", "trades": [], "metrics": _empty_metrics(), "paper_only": True}
+        return {"status": "REJECTED", "reason": "No historical candles provided.", "trades": [], "metrics": _empty_metrics(config.budget), "paper_only": True}
     required = {"timestamp", "open", "high", "low", "close", "volume"}
     if not required.issubset(df.columns):
-        return {"status": "REJECTED", "reason": "Historical data missing required OHLCV columns.", "trades": [], "metrics": _empty_metrics(), "paper_only": True}
+        return {"status": "REJECTED", "reason": "Historical data missing required OHLCV columns.", "trades": [], "metrics": _empty_metrics(config.budget), "paper_only": True}
     bars = df.copy()
     bars["timestamp"] = pd.to_datetime(bars["timestamp"], errors="coerce")
     for col in ("open", "high", "low", "close", "volume"):
         bars[col] = pd.to_numeric(bars[col], errors="coerce")
     if bars[required].isna().any().any():
-        return {"status": "REJECTED", "reason": "Historical candles contain invalid timestamps or missing/non-numeric OHLCV values.", "trades": [], "metrics": _empty_metrics(), "paper_only": True}
+        return {"status": "REJECTED", "reason": "Historical candles contain invalid timestamps or missing/non-numeric OHLCV values.", "trades": [], "metrics": _empty_metrics(config.budget), "paper_only": True}
     if bars["timestamp"].duplicated().any():
         return {"status": "REJECTED", "reason": "Historical candles contain duplicate timestamps.", "trades": [], "metrics": _empty_metrics(), "paper_only": True}
     bars = bars.sort_values("timestamp").reset_index(drop=True)
