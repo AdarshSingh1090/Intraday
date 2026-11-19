@@ -53,7 +53,7 @@ def evaluate_performance(trades, starting_equity=8900.0, bootstrap_iterations=50
     """Compute trade, equity, daily, and uncertainty metrics from closed trades."""
     if not _finite(starting_equity) or float(starting_equity) <= 0:
         raise ValueError("starting_equity must be a finite positive number")
-    trades = list(trades or [])
+    trades = sorted(list(trades or []), key=lambda t: str(t.get("entry_timestamp") or t.get("exit_timestamp") or ""))
     pnl = [_safe_float(t.get("net_pnl")) for t in trades]
     gross_pnl = [_safe_float(t.get("gross_pnl")) for t in trades]
     fees = [_safe_float(t.get("estimated_fees")) for t in trades]
@@ -84,6 +84,7 @@ def evaluate_performance(trades, starting_equity=8900.0, bootstrap_iterations=50
         stamp = str(trade.get("entry_timestamp") or trade.get("exit_timestamp") or "")
         day = stamp[:10] if stamp else "UNKNOWN"
         daily[day] = daily.get(day, 0.0) + value
+    daily = dict(sorted(daily.items()))
     daily_values = list(daily.values())
     daily_returns = []
     running_equity = float(starting_equity)
