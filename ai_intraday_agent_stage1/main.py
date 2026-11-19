@@ -22,6 +22,7 @@ from market_intelligence.risk import assess_candidate, RiskConfig
 from market_intelligence.paper_simulator import simulate_candidate, SimulationConfig, PaperTradeStore
 import json
 from market_intelligence.backtester import backtest, BacktestConfig
+from market_intelligence.experiment import run_chronological_experiment
 
 
 # =========================================================
@@ -419,6 +420,58 @@ def cmd_risk(args):
     print("=" * 58)
     if args.require_approved and not risk["approved"]:
         raise SystemExit(2)
+
+
+# =========================================================
+# CHRONOLOGICAL RESEARCH EXPERIMENT
+# =========================================================
+
+def cmd_research(args):
+    historical = pd.read_csv(args.file)
+    def config_factory(start_date, end_date):
+        return BacktestConfig(
+            interval_minutes=args.interval,
+            warmup_bars=args.warmup_bars,
+            budget=args.budget,
+            max_trades_per_day=args.max_trades_per_day,
+            daily_loss_limit_pct=args.daily_loss_limit_pct,
+            risk_per_trade_pct=args.risk_per_trade_pct,
+            max_capital_per_trade_pct=args.max_capital_per_trade_pct,
+            max_portfolio_exposure_pct=args.max_portfolio_exposure_pct,
+            slippage_bps_per_side=args.slippage_bps,
+            fee_rate_per_side=args.fee_rate,
+            flat_fee_per_side=args.flat_fee,
+            long_only=args.long_only,
+            start_date=start_date,
+            end_date=end_date,
+            market_timezone=args.market_timezone,
+            session_start=args.session_start,
+            session_end=args.session_end,
+        )
+    report=run_chronological_experiment(
+        historical, backtest, config_factory, symbol=args.symbol,
+        train_fraction=args.train_fraction,
+        validation_fraction=args.validation_fraction,
+    )
+    print("\\n" + "=" * 68)
+    print("       CHRONOLOGICAL RESEARCH EXPERIMENT")
+    print("=" * 68)
+    print(f"Symbol: {args.symbol}")
+    print(f"Split dates: {report['splits']}")
+    for period,result in report["results"].items():
+        print(f"\\n{period.upper()} ({result['date_range']}):")
+        metrics=result.get("metrics",{})
+        for key in ("trades","win_rate_pct","profit_factor","net_pnl",
+                    "expectancy_per_trade","total_return_pct","max_drawdown_pct"):
+            if key in metrics:
+                print(f"  {key}: {metrics[key]}")
+    print("\\nPaper-only: YES | Execution: NONE")
+    print("=" * 68)
+    if args.report_json:
+        out=Path(args.report_json)
+        out.parent.mkdir(parents=True,exist_ok=True)
+        out.write_text(json.dumps(report,indent=2,default=str,allow_nan=False),encoding="utf-8")
+        print(f"Experiment report saved: {out}")
 
 
 # =========================================================
@@ -883,6 +936,33 @@ def build_parser():
     rk.add_argument("--long-only", action="store_true")
     rk.add_argument("--require-approved", action="store_true")
     rk.set_defaults(func=cmd_risk)
+
+    # -----------------------------------------------------
+    # CHRONOLOGICAL RESEARCH EXPERIMENT
+    # -----------------------------------------------------
+
+    research = sub.add_parser("research")
+    research.add_argument("--file", required=True, help="Historical OHLCV CSV.")
+    research.add_argument("--symbol", required=True)
+    research.add_argument("--interval", type=int, default=5)
+    research.add_argument("--warmup-bars", type=int, default=60)
+    research.add_argument("--budget", type=float, default=8900.0)
+    research.add_argument("--train-fraction", type=float, default=0.60)
+    research.add_argument("--validation-fraction", type=float, default=0.20)
+    research.add_argument("--max-trades-per-day", type=int, default=3)
+    research.add_argument("--daily-loss-limit-pct", type=float, default=2.0)
+    research.add_argument("--risk-per-trade-pct", type=float, default=0.5)
+    research.add_argument("--max-capital-per-trade-pct", type=float, default=35.0)
+    research.add_argument("--max-portfolio-exposure-pct", type=float, default=70.0)
+    research.add_argument("--slippage-bps", type=float, default=5.0)
+    research.add_argument("--fee-rate", type=float, default=0.0003)
+    research.add_argument("--flat-fee", type=float, default=0.0)
+    research.add_argument("--long-only", action="store_true")
+    research.add_argument("--market-timezone", default="Asia/Kolkata")
+    research.add_argument("--session-start", default="09:15")
+    research.add_argument("--session-end", default="15:30")
+    research.add_argument("--report-json", help="Optional path for full experiment report.")
+    research.set_defaults(func=cmd_research)
 
     # -----------------------------------------------------
     # HISTORICAL BACKTEST (RESEARCH ONLY)
