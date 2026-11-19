@@ -51,6 +51,11 @@ class RiskTests(unittest.TestCase):
         result=assess_candidate({"direction":"HOLD","entry_reference_price":100,"stop_loss":98,"target":104})
         self.assertFalse(result["approved"])
 
+    def test_reward_risk_below_minimum_rejected(self):
+        result=assess_candidate(candidate(target=102.5))
+        self.assertFalse(result["approved"])
+        self.assertIn("Reward/risk below minimum 2.0:1.", result["reasons"])
+
 
 if __name__ == "__main__":
     unittest.main()
