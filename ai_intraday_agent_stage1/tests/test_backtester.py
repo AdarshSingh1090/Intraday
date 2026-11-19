@@ -24,6 +24,11 @@ class BacktesterTests(unittest.TestCase):
         result=backtest(pd.DataFrame({"timestamp":["2026-01-01"]}))
         self.assertEqual(result["status"],"REJECTED")
 
+    def test_invalid_configuration_rejected(self):
+        result=backtest(candles(65),config=BacktestConfig(budget="not-a-number"))
+        self.assertEqual(result["status"],"REJECTED")
+        self.assertIn("Invalid backtest configuration",result["reason"])
+
     def test_insufficient_history_rejected(self):
         result=backtest(candles(30),config=BacktestConfig(warmup_bars=60))
         self.assertEqual(result["status"],"REJECTED")
