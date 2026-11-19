@@ -10,7 +10,7 @@ class RiskConfig:
     max_capital_per_trade_pct: float = 35.0
     max_portfolio_exposure_pct: float = 70.0
     max_daily_loss_pct: float = 2.0
-    max_trades_per_day: int = 3
+    max_trades_per_day: int = 3\n    minimum_reward_risk_ratio: float = 2.0
 
 
 def _number(value):
