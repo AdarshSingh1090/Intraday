@@ -65,6 +65,19 @@ class BacktesterTests(unittest.TestCase):
         self.assertEqual(result["status"],"REJECTED")
         self.assertIn("inconsistent OHLC",result["reason"])
 
+    def test_date_bounds_exclude_out_of_period_signals(self):
+        data=candles(65)
+        result=backtest(data,config=BacktestConfig(warmup_bars=60,start_date="2026-01-06",end_date="2026-01-06"))
+        self.assertEqual(result["status"],"COMPLETED")
+        self.assertEqual(result["metrics"]["trades"],0)
+
+    def test_completed_result_contains_benchmarks(self):
+        data=candles(65)
+        with patch("market_intelligence.backtester.evaluate_market_data", return_value={"trade_eligible":False,"blocking_reasons":["test"]}):
+            result=backtest(data,config=BacktestConfig(warmup_bars=60))
+        self.assertEqual(result["benchmarks"]["status"],"COMPLETED")
+        self.assertIn("buy_and_hold",result["benchmarks"]["benchmarks"])
+
     def test_walk_forward_uses_only_future_bars_for_fill(self):
         data=candles(65)
         fake_candidate={"symbol":"TEST","direction":"LONG","signal_timestamp":str(data.iloc[60].timestamp),
