@@ -440,6 +440,8 @@ def cmd_backtest(args):
         fee_rate_per_side=args.fee_rate,
         flat_fee_per_side=args.flat_fee,
         long_only=args.long_only,
+        start_date=args.start_date,
+        end_date=args.end_date,
     )
     result = backtest(historical, symbol=args.symbol, config=cfg)
     print("\n" + "=" * 68)
@@ -898,6 +900,8 @@ def build_parser():
     bt.add_argument("--fee-rate", type=float, default=0.0003)
     bt.add_argument("--flat-fee", type=float, default=0.0)
     bt.add_argument("--long-only", action="store_true")
+    bt.add_argument("--start-date", help="Inclusive signal date (YYYY-MM-DD); earlier bars remain available for warm-up.")
+    bt.add_argument("--end-date", help="Inclusive final signal/exit date (YYYY-MM-DD).")
     bt.add_argument("--report-json", help="Optional output path for complete JSON report.")
     bt.add_argument("--trades-csv", help="Optional output path for simulated trades CSV.")
     bt.add_argument("--require-trades", action="store_true", help="Exit with code 2 if no trades are produced.")
