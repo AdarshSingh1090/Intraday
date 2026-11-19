@@ -118,8 +118,7 @@ def generate_setup(evaluation, config=None):
 
     if score < config.minimum_score:
         return _no_trade("NO_SETUP", ["Setup score below threshold.", *failed],
-                        {"direction": direction, "score": score, "confidence": confidence
-                         "passed_checks": reasons, "failed_checks": failed})
+                        {"direction": direction, "score": score, "confidence": confidence,\n                         "passed_checks": reasons, "failed_checks": failed})
 
     entry_reference = close
     stop_distance = atr * config.atr_stop_multiplier
