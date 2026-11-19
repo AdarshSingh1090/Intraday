@@ -11,6 +11,7 @@ class SimulationConfig:
     slippage_bps_per_side: float = 5.0
     fee_rate_per_side: float = 0.0003
     flat_fee_per_side: float = 0.0
+    market_timezone: str = "Asia/Kolkata"
 
 
 def _valid_num(x):
@@ -38,6 +39,13 @@ def simulate_candidate(candidate, forward_candles, config=None):
     if not required_cols.issubset(bars.columns):
         return {"status": "REJECTED", "reason": "Forward candles missing required OHLC columns.", "paper_only": True}
     bars["timestamp"] = pd.to_datetime(bars["timestamp"], errors="coerce")
+    try:
+        if bars["timestamp"].dt.tz is None:
+            bars["timestamp"] = bars["timestamp"].dt.tz_localize(config.market_timezone)
+        else:
+            bars["timestamp"] = bars["timestamp"].dt.tz_convert(config.market_timezone)
+    except (TypeError, ValueError):
+        return {"status": "REJECTED", "reason": "Forward timestamps could not be normalized to market timezone.", "paper_only": True}
     for col in ("open", "high", "low", "close"):
         bars[col] = pd.to_numeric(bars[col], errors="coerce")
     if bars[["timestamp", "open", "high", "low", "close"]].isna().any().any():
@@ -56,6 +64,10 @@ def simulate_candidate(candidate, forward_candles, config=None):
     if signal_ts:
         try:
             signal_time = pd.to_datetime(signal_ts)
+            if signal_time.tzinfo is None:
+                signal_time = signal_time.tz_localize(config.market_timezone)
+            else:
+                signal_time = signal_time.tz_convert(config.market_timezone)
             first_forward_time = pd.to_datetime(bars.iloc[0]["timestamp"])
             if first_forward_time <= signal_time:
                 return {"status": "REJECTED", "reason": "Forward candles must begin strictly after the signal timestamp.", "paper_only": True}
