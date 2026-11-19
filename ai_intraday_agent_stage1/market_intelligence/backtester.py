@@ -133,7 +133,7 @@ def backtest(df, symbol="UNKNOWN", config=None, strategy_config=None):
         # Resume after the exit candle; never allow overlapping positions.
         exit_ts = pd.to_datetime(sim["exit_timestamp"], errors="coerce")
         exit_idx = bars.index[bars["timestamp"] == exit_ts]
-        i = int(exit_idx[0]) + 1 if len(exit_idx) else i + 1
+        i = max(i + 1, int(exit_idx[0]) + 1) if len(exit_idx) else i + 1
 
     return {
         "status": "COMPLETED",
