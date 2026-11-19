@@ -51,6 +51,8 @@ def assess_candidate(candidate, config=None, open_exposure=0.0, daily_pnl=0.0, t
         reasons.append("Short candidate requires target < entry < stop.")
     elif direction not in ("LONG", "SHORT"):
         reasons.append("Unsupported direction.")
+    if risk_per_share > 0 and abs(target - entry) / risk_per_share < config.minimum_reward_risk_ratio:
+        reasons.append(f"Reward/risk below minimum {config.minimum_reward_risk_ratio}:1.")
 
     if config.budget <= 0:
         reasons.append("Budget must be positive.")
