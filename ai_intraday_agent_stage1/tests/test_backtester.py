@@ -65,6 +65,15 @@ class BacktesterTests(unittest.TestCase):
         self.assertEqual(result["status"],"REJECTED")
         self.assertIn("inconsistent OHLC",result["reason"])
 
+    def test_regular_session_filter_and_timezone_normalization(self):
+        data=candles(65)
+        data.loc[len(data)] = [pd.Timestamp("2026-01-05 08:30"),100,101,99,100,1000]
+        data.loc[len(data)] = [pd.Timestamp("2026-01-05 15:40"),100,101,99,100,1000]
+        result=backtest(data,config=BacktestConfig(warmup_bars=60))
+        self.assertEqual(result["status"],"COMPLETED")
+        self.assertEqual(result["excluded_out_of_session_bars"],2)
+        self.assertEqual(result["market_timezone"],"Asia/Kolkata")
+
     def test_date_bounds_exclude_out_of_period_signals(self):
         data=candles(65)
         result=backtest(data,config=BacktestConfig(warmup_bars=60,start_date="2026-01-06",end_date="2026-01-06"))
