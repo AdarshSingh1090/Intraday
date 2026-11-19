@@ -1,5 +1,5 @@
 import unittest
-from market_intelligence.performance import evaluate_performance
+from market_intelligence.performance import evaluate_performance, segment_performance
 
 
 class PerformanceTests(unittest.TestCase):
@@ -16,6 +16,17 @@ class PerformanceTests(unittest.TestCase):
         self.assertAlmostEqual(m["max_drawdown_pct"], 18.1818, places=3)
         self.assertEqual(m["trades"], 3)
         self.assertIsNotNone(m["expectancy_bootstrap_95_ci"])
+
+    def test_segment_attribution(self):
+        trades=[
+            {"net_pnl":10,"gross_pnl":12,"estimated_fees":2,"symbol":"AAA","direction":"LONG","exit_reason":"TARGET"},
+            {"net_pnl":-5,"gross_pnl":-3,"estimated_fees":2,"symbol":"AAA","direction":"SHORT","exit_reason":"STOP"},
+            {"net_pnl":20,"gross_pnl":22,"estimated_fees":2,"symbol":"BBB","direction":"LONG","exit_reason":"TARGET"},
+        ]
+        segments=segment_performance(trades,group_by=("symbol","direction"),starting_equity=1000,bootstrap_iterations=100)
+        self.assertEqual(segments["symbol"]["AAA"]["trades"],2)
+        self.assertEqual(segments["direction"]["LONG"]["trades"],2)
+        self.assertEqual(segments["direction"]["SHORT"]["net_pnl"],-5)
 
     def test_empty_trades(self):
         m = evaluate_performance([], 8900)
