@@ -18,6 +18,7 @@ from database.store import CandleStore
 from market_intelligence.quality_gate import assess_candles, print_quality_report
 from market_intelligence.evaluation import evaluate_market_data
 from market_intelligence.strategy import generate_setup, StrategyConfig
+from market_intelligence.risk import assess_candidate, RiskConfig
 
 
 # =========================================================
@@ -379,6 +380,45 @@ def cmd_strategy(args):
 
 
 # =========================================================
+# RISK CHECK (PAPER POSITION SIZE ONLY)
+# =========================================================
+
+def cmd_risk(args):
+    store = CandleStore(str(DB))
+    df = store.read(args.symbol, args.interval)
+    if df.empty:
+        print(f"No data found for {args.symbol} at {args.interval}-minute interval.")
+        return
+    evaluation = evaluate_market_data(df, interval_minutes=args.interval, symbol=args.symbol)
+    setup = generate_setup(evaluation, StrategyConfig(allow_short=not args.long_only))
+    risk = assess_candidate(
+        setup.get("candidate"),
+        RiskConfig(budget=args.budget),
+        open_exposure=args.open_exposure,
+        daily_pnl=args.daily_pnl,
+        trades_today=args.trades_today,
+    )
+    print("\n" + "=" * 58)
+    print("       PAPER RISK & POSITION SIZING")
+    print("=" * 58)
+    print(f"Symbol: {args.symbol}")
+    print(f"Strategy status: {setup['status']}")
+    print(f"Strategy signal: {setup['signal']}")
+    print(f"Risk status: {risk['status']}")
+    for key in ("quantity", "capital_required", "capital_pct_of_budget",
+                "total_risk", "risk_pct_of_budget", "risk_budget",
+                "reward_risk_ratio", "daily_loss_limit"):
+        if key in risk:
+            print(f"{key}: {risk[key]}")
+    for reason in risk.get("reasons", []):
+        print(f"- {reason}")
+    print("Paper-only: YES | Execution: NONE")
+    print("=" * 58)
+    if args.require_approved and not risk["approved"]:
+        raise SystemExit(2)
+
+
+# =========================================================
 # DATABASE STATUS
 # =========================================================
 
@@ -716,6 +756,24 @@ def build_parser():
     st.add_argument("--require-candidate", action="store_true",
                     help="Exit with code 2 when no candidate is produced.")
     st.set_defaults(func=cmd_strategy)
+
+    # -----------------------------------------------------
+    # RISK
+    # -----------------------------------------------------
+
+    rk = sub.add_parser("risk")
+    rk.add_argument("--symbol", required=True)
+    rk.add_argument("--interval", type=int, required=True)
+    rk.add_argument("--budget", type=float, default=8900.0)
+    rk.add_argument("--open-exposure", type=float, default=0.0,
+                    help="Current simulated open-position capital; not yet persisted.")
+    rk.add_argument("--daily-pnl", type=float, default=0.0,
+                    help="Current simulated daily P&L; not yet persisted.")
+    rk.add_argument("--trades-today", type=int, default=0,
+                    help="Current simulated trade count; not yet persisted.")
+    rk.add_argument("--long-only", action="store_true")
+    rk.add_argument("--require-approved", action="store_true")
+    rk.set_defaults(func=cmd_risk)
 
     # -----------------------------------------------------
     # STATUS
