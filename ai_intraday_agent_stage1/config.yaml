@@ -1,0 +1,33 @@
+app:
+  name: AI Intraday Agent - Stage 1
+  timezone: Asia/Kolkata
+  mode: paper_only
+
+data:
+  provider: upstox
+  database: database/market_data.sqlite
+  raw_dir: data/raw
+  processed_dir: data/processed
+  max_staleness_minutes: 10
+  intervals:
+    - 1
+    - 5
+
+instruments:
+  # Instrument keys are provider-specific identifiers.
+  # Confirm keys from Upstox instrument master before using live API.
+  watchlist:
+    - symbol: RELIANCE
+      instrument_key: NSE_EQ|INE002A01018
+    - symbol: TCS
+      instrument_key: NSE_EQ|INE467B01029
+    - symbol: INFY
+      instrument_key: NSE_EQ|INE009A01021
+    - symbol: NIFTY50
+      instrument_key: NSE_INDEX|Nifty 50
+
+validation:
+  require_positive_prices: true
+  require_nonnegative_volume: true
+  reject_duplicate_timestamps: true
+  reject_ohlc_inconsistency: true
