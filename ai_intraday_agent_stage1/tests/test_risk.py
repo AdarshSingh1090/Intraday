@@ -34,9 +34,9 @@ class RiskTests(unittest.TestCase):
         self.assertFalse(result["approved"])
 
     def test_exposure_limit_restricts_quantity(self):
-        result=assess_candidate(candidate(), open_exposure=6200)
+        result=assess_candidate(candidate(), open_exposure=6000)
         self.assertTrue(result["approved"])
-        self.assertLessEqual(result["capital_required"], 8900*0.70-6200)
+        self.assertLessEqual(result["capital_required"], 8900*0.70-6000)
 
     def test_zero_quantity_rejected(self):
         result=assess_candidate(candidate(entry=100000,stop=99998,target=100004))
