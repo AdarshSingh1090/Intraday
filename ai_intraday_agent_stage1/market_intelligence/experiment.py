@@ -29,6 +29,9 @@ def chronological_split(df, timestamp_col="timestamp", train_fraction=0.60, vali
         "train": work[work[timestamp_col].dt.date.isin(train_dates)].copy(),
         "validation": work[work[timestamp_col].dt.date.isin(val_dates)].copy(),
         "test": work[work[timestamp_col].dt.date.isin(test_dates)].copy(),
+        # Warm-up context includes only dates through each evaluation period's end.
+        "validation_with_warmup": work[work[timestamp_col].dt.date <= val_dates[-1]].copy(),
+        "test_with_warmup": work[work[timestamp_col].dt.date <= test_dates[-1]].copy(),
         "date_ranges": {
             "train": [str(train_dates[0]), str(train_dates[-1])],
             "validation": [str(val_dates[0]), str(val_dates[-1])],
@@ -66,6 +69,7 @@ def walk_forward_splits(df, timestamp_col="timestamp", min_train_days=20,
             "validation": work[work[timestamp_col].dt.date.isin(val_dates)].copy(),
             "train_dates": [str(train_dates[0]), str(train_dates[-1])],
             "validation_dates": [str(val_dates[0]), str(val_dates[-1])],
+            "validation_with_warmup": work[work[timestamp_col].dt.date <= val_dates[-1]].copy(),
             "expanding": expanding,
         })
         validation_start += step_days
