@@ -132,8 +132,15 @@ def assess_candles(df, interval_minutes=5, now=None, config=None):
         blocking.append("Latest candle has quality flags: " + ", ".join(latest_flags))
     if recent_quality < config.minimum_recent_quality:
         blocking.append(f"Recent candle quality is below threshold ({recent_quality:.1%}).")
-    if total_missing:
-        blocking.append(f"Missing candles detected inside observed ranges: {total_missing}.")
+    latest_date = latest_ts.date()
+    latest_day_gaps = [g for g in gap_records if g["date"] == str(latest_date)]
+    latest_day_missing = sum(g["missing_count"] for g in latest_day_gaps)
+    recent_flags = work.tail(config.recent_window)
+    recent_anomalies = int(recent_flags[["zero_volume", "flat_low_volume", "flat_high_volume", "duplicate_timestamp"]].any(axis=1).sum())
+    if latest_day_missing:
+        blocking.append(f"Missing candles in latest trading session: {latest_day_missing}.")
+    if recent_anomalies:
+        blocking.append(f"Suspicious candles/duplicates in recent window: {recent_anomalies}.")
     if bool(latest_row["invalid_timestamp"] or latest_row["null_values"] or latest_row["invalid_ohlc"] or latest_row["negative_volume"]):
         blocking.append("Latest candle has a structural data error.")
 
@@ -150,6 +157,8 @@ def assess_candles(df, interval_minutes=5, now=None, config=None):
         "duplicate_timestamps": int(work["duplicate_timestamp"].sum()),
         "missing_candles_within_observed_ranges": int(total_missing),
         "missing_candle_details": gap_records,
+        "latest_session_missing_candles": int(latest_day_missing),
+        "recent_suspicious_candles": recent_anomalies,
         "recent_quality_fraction": round(recent_quality, 4),
         "median_positive_volume": volume_median,
         "flat_low_volume_threshold": low_threshold,
