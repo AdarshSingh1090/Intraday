@@ -29,8 +29,10 @@ def assess_candidate(candidate, config=None, open_exposure=0.0, daily_pnl=0.0, t
         return {"status": "REJECTED", "approved": False, "quantity": 0,
                 "reasons": ["No candidate supplied."], "paper_only": True, "execution": "none"}
 
-    required = ("direction", "entry_reference_price", "stop_loss", "target")
-    missing = [k for k in required if k not in candidate or not _number(candidate[k])]
+    required_numeric = ("entry_reference_price", "stop_loss", "target")
+    missing = [k for k in required_numeric if k not in candidate or not _number(candidate[k])]
+    if not isinstance(candidate.get("direction"), str) or not candidate.get("direction"):
+        missing.append("direction")
     if missing:
         return {"status": "REJECTED", "approved": False, "quantity": 0,
                 "reasons": ["Missing/invalid candidate fields: " + ", ".join(missing)],
