@@ -85,17 +85,24 @@ def calculate_metrics(trades, starting_equity=8900.0):
 def backtest(df, symbol="UNKNOWN", config=None, strategy_config=None):
     """Walk forward: signal uses bars through t; fill/simulation uses t+1 onward."""
     config = config or BacktestConfig()
-    if (not isinstance(config.interval_minutes, int) or config.interval_minutes <= 0
-            or not isinstance(config.warmup_bars, int) or config.warmup_bars < 1
-            or not math.isfinite(float(config.budget)) or config.budget <= 0
-            or not 0 < config.risk_per_trade_pct <= 100
-            or not 0 < config.max_capital_per_trade_pct <= 100
-            or not 0 < config.max_portfolio_exposure_pct <= 100
-            or not 0 < config.daily_loss_limit_pct <= 100
-            or config.max_trades_per_day < 1
-            or any(not math.isfinite(float(x)) or float(x) < 0 for x in
-                   (config.slippage_bps_per_side, config.fee_rate_per_side, config.flat_fee_per_side))):
-        return {"status": "REJECTED", "reason": "Invalid backtest configuration.", "trades": [], "metrics": _empty_metrics(config.budget if math.isfinite(float(config.budget)) and config.budget > 0 else 0.0), "paper_only": True}
+    try:
+        budget = float(config.budget)
+        numeric_costs = [float(config.slippage_bps_per_side), float(config.fee_rate_per_side), float(config.flat_fee_per_side)]
+        numeric_limits = [float(config.risk_per_trade_pct), float(config.max_capital_per_trade_pct),
+                          float(config.max_portfolio_exposure_pct), float(config.daily_loss_limit_pct)]
+        valid_config = (
+            isinstance(config.interval_minutes, int) and config.interval_minutes > 0
+            and isinstance(config.warmup_bars, int) and config.warmup_bars >= 1
+            and math.isfinite(budget) and budget > 0
+            and all(math.isfinite(x) and 0 < x <= 100 for x in numeric_limits)
+            and isinstance(config.max_trades_per_day, int) and config.max_trades_per_day >= 1
+            and all(math.isfinite(x) and x >= 0 for x in numeric_costs)
+        )
+    except (TypeError, ValueError, OverflowError):
+        valid_config = False
+        budget = 0.0
+    if not valid_config:
+        return {"status": "REJECTED", "reason": "Invalid backtest configuration.", "trades": [], "metrics": _empty_metrics(budget), "paper_only": True}
     if not isinstance(df, pd.DataFrame) or df.empty:
         return {"status": "REJECTED", "reason": "No historical candles provided.", "trades": [], "metrics": _empty_metrics(config.budget), "paper_only": True}
     required = {"timestamp", "open", "high", "low", "close", "volume"}
