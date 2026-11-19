@@ -42,7 +42,7 @@ def _empty_metrics(starting_equity=0.0):
 
 def calculate_metrics(trades, starting_equity=8900.0):
     if not trades:
-        return _empty_metrics()
+        return _empty_metrics(starting_equity)
     pnl = [float(t.get("net_pnl", 0.0)) for t in trades]
     wins = [x for x in pnl if x > 0]
     losses = [x for x in pnl if x < 0]
@@ -61,7 +61,7 @@ def calculate_metrics(trades, starting_equity=8900.0):
         "gross_pnl": round(sum(float(t.get("gross_pnl", 0)) for t in trades), 2),
         "estimated_fees": round(sum(float(t.get("estimated_fees", 0)) for t in trades), 2),
         "net_pnl": round(sum(pnl), 2),
-        "profit_factor": round(gross_profit / gross_loss, 3) if gross_loss else (float("inf") if gross_profit else 0.0),
+        "profit_factor": round(gross_profit / gross_loss, 3) if gross_loss else None,
         "average_win": round(sum(wins) / len(wins), 2) if wins else 0.0,
         "average_loss": round(sum(losses) / len(losses), 2) if losses else 0.0,
         "max_drawdown": round(max_dd, 2),
@@ -94,10 +94,10 @@ def backtest(df, symbol="UNKNOWN", config=None, strategy_config=None):
     bars["timestamp"] = pd.to_datetime(bars["timestamp"], errors="coerce")
     for col in ("open", "high", "low", "close", "volume"):
         bars[col] = pd.to_numeric(bars[col], errors="coerce")
-    if bars[required].isna().any().any():
+    if bars[list(required)].isna().any().any():
         return {"status": "REJECTED", "reason": "Historical candles contain invalid timestamps or missing/non-numeric OHLCV values.", "trades": [], "metrics": _empty_metrics(config.budget), "paper_only": True}
     if bars["timestamp"].duplicated().any():
-        return {"status": "REJECTED", "reason": "Historical candles contain duplicate timestamps.", "trades": [], "metrics": _empty_metrics(), "paper_only": True}
+        return {"status": "REJECTED", "reason": "Historical candles contain duplicate timestamps.", "trades": [], "metrics": _empty_metrics(config.budget), "paper_only": True}
     bars = bars.sort_values("timestamp").reset_index(drop=True)
     o, h, l, cl = (bars[col] for col in ("open", "high", "low", "close"))
     invalid_ohlc = (h < bars[["open", "close", "low"]].max(axis=1)) | (l > bars[["open", "close"]].min(axis=1))
