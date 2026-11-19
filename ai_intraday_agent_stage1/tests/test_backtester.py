@@ -89,12 +89,12 @@ class BacktesterTests(unittest.TestCase):
 
     def test_walk_forward_uses_only_future_bars_for_fill(self):
         data=candles(65)
-        fake_candidate={"symbol":"TEST","direction":"LONG","signal_timestamp":str(data.iloc[60].timestamp),
+        fake_candidate={"symbol":"TEST","direction":"LONG","signal_timestamp":str(data.iloc[60].timestamp.tz_localize("Asia/Kolkata")),
                        "entry_reference_price":100,"stop_loss":98,"target":104}
         fake_risk={"approved":True,"quantity":1,"risk_budget":100}
         fake_sim={"status":"SIMULATED","symbol":"TEST","direction":"LONG","quantity":1,
-                  "signal_timestamp":fake_candidate["signal_timestamp"],"entry_timestamp":str(data.iloc[61].timestamp),
-                  "exit_timestamp":str(data.iloc[64].timestamp),"gross_pnl":1,"estimated_fees":0,"net_pnl":1}
+                  "signal_timestamp":fake_candidate["signal_timestamp"],"entry_timestamp":str(data.iloc[61].timestamp.tz_localize("Asia/Kolkata")),
+                  "exit_timestamp":str(data.iloc[64].timestamp.tz_localize("Asia/Kolkata")),"gross_pnl":1,"estimated_fees":0,"net_pnl":1}
         with patch("market_intelligence.backtester.evaluate_market_data", return_value={"trade_eligible":True,"blocking_reasons":[]}), \
              patch("market_intelligence.backtester.generate_setup", return_value={"status":"CANDIDATE","candidate":fake_candidate}), \
              patch("market_intelligence.backtester.assess_candidate", return_value=fake_risk), \
