@@ -15,6 +15,7 @@ from market_data.yahoo import YahooProvider
 
 from data_validation import validate
 from database.store import CandleStore
+from market_intelligence.quality_gate import assess_candles, print_quality_report
 
 
 # =========================================================
@@ -273,6 +274,26 @@ def cmd_quality(args):
     )
 
     print_report(report)
+
+
+# =========================================================
+# NEW QUALITY GATE
+# =========================================================
+
+def cmd_quality_gate(args):
+    store = CandleStore(str(DB))
+    df = store.read(args.symbol, args.interval)
+    if df.empty:
+        print(f"No data found for {args.symbol} at {args.interval}-minute interval.")
+        return
+    report = assess_candles(
+        df,
+        interval_minutes=args.interval,
+        config=None
+    )
+    print_quality_report(report)
+    if args.require_eligible and not report["trade_eligible"]:
+        raise SystemExit(2)
 
 
 # =========================================================
@@ -578,6 +599,17 @@ def build_parser():
     q.set_defaults(
         func=cmd_quality
     )
+
+    # -----------------------------------------------------
+    # QUALITY GATE
+    # -----------------------------------------------------
+
+    qg = sub.add_parser("quality-gate")
+    qg.add_argument("--symbol", required=True)
+    qg.add_argument("--interval", type=int, required=True)
+    qg.add_argument("--require-eligible", action="store_true",
+                    help="Exit with code 2 when data is not trade eligible.")
+    qg.set_defaults(func=cmd_quality_gate)
 
     # -----------------------------------------------------
     # STATUS
