@@ -146,3 +146,21 @@ def evaluate_performance(trades, starting_equity=8900.0, bootstrap_iterations=50
             "Metrics are historical simulation estimates, not forecasts."
         ],
     }
+
+def segment_performance(trades, group_by=("symbol", "direction", "exit_reason"),
+                       starting_equity=8900.0, bootstrap_iterations=1000):
+    """Summarize performance by grounded trade attributes; omit missing groups."""
+    output = {}
+    for field in group_by:
+        groups = {}
+        for trade in trades or []:
+            value = trade.get(field)
+            if value is None:
+                continue
+            groups.setdefault(str(value), []).append(trade)
+        output[field] = {
+            label: evaluate_performance(group, starting_equity=starting_equity,
+                                       bootstrap_iterations=bootstrap_iterations)
+            for label, group in groups.items()
+        }
+    return output
