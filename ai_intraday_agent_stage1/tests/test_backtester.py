@@ -49,7 +49,7 @@ class BacktesterTests(unittest.TestCase):
         fake_risk={"approved":True,"quantity":1,"risk_budget":100}
         fake_sim={"status":"SIMULATED","symbol":"TEST","direction":"LONG","quantity":1,
                   "signal_timestamp":fake_candidate["signal_timestamp"],"entry_timestamp":str(data.iloc[61].timestamp),
-                  "exit_timestamp":str(data.iloc[62].timestamp),"gross_pnl":1,"estimated_fees":0,"net_pnl":1}
+                  "exit_timestamp":str(data.iloc[64].timestamp),"gross_pnl":1,"estimated_fees":0,"net_pnl":1}
         with patch("market_intelligence.backtester.evaluate_market_data", return_value={"trade_eligible":True,"blocking_reasons":[]}), \
              patch("market_intelligence.backtester.generate_setup", return_value={"status":"CANDIDATE","candidate":fake_candidate}), \
              patch("market_intelligence.backtester.assess_candidate", return_value=fake_risk), \
