@@ -19,6 +19,8 @@ class PaperSimulatorTests(unittest.TestCase):
         result=simulate_candidate(c(),bars([["09:20",100,105,99,104,1000]]),SimulationConfig(0,0,0))
         self.assertEqual(result["exit_reason"],"TARGET")
         self.assertEqual(result["net_pnl"],40)
+        self.assertIn("entry_time_bucket",result)
+        self.assertIn("entry_month",result)
 
     def test_long_stop_hit(self):
         result=simulate_candidate(c(),bars([["09:20",100,101,97,99,1000]]),SimulationConfig(0,0,0))
