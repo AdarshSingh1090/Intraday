@@ -22,12 +22,16 @@ class ExperimentTests(unittest.TestCase):
         self.assertFalse(val & test)
         self.assertLess(max(split["train"].timestamp), min(split["validation"].timestamp))
         self.assertLess(max(split["validation"].timestamp), min(split["test"].timestamp))
+        self.assertLess(max(split["train"].timestamp), min(split["validation_with_warmup"].timestamp))
+        self.assertEqual(max(split["validation_with_warmup"].timestamp), max(split["validation"].timestamp))
+        self.assertEqual(max(split["test_with_warmup"].timestamp), max(split["test"].timestamp))
 
     def test_walk_forward_generates_ordered_folds(self):
         folds=walk_forward_splits(dataset(), min_train_days=20, validation_days=5, step_days=5)
         self.assertGreaterEqual(len(folds), 3)
         for fold in folds:
             self.assertLess(max(fold["train"].timestamp), min(fold["validation"].timestamp))
+            self.assertEqual(max(fold["validation_with_warmup"].timestamp), max(fold["validation"].timestamp))
 
     def test_invalid_split_rejected(self):
         with self.assertRaises(ValueError):
