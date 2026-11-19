@@ -215,7 +215,12 @@ def backtest(df, symbol="UNKNOWN", config=None, strategy_config=None):
         "trades": trades,
         "skipped": skipped,
         "metrics": calculate_metrics(trades, starting_equity=config.budget),
-        "segments": segment_performance(trades, starting_equity=config.budget),
+        "segments": segment_performance(
+            trades, group_by=("symbol", "direction", "exit_reason", "trend",
+                              "trend_strength", "volatility", "entry_time_bucket",
+                              "entry_month", "entry_weekday"),
+            starting_equity=config.budget, bootstrap_iterations=0,
+        ),
         "benchmarks": benchmarks,
         "paper_only": True,
         "execution": "none",
