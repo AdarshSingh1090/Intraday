@@ -22,7 +22,7 @@ class ExperimentTests(unittest.TestCase):
         self.assertFalse(val & test)
         self.assertLess(max(split["train"].timestamp), min(split["validation"].timestamp))
         self.assertLess(max(split["validation"].timestamp), min(split["test"].timestamp))
-        self.assertLess(max(split["train"].timestamp), min(split["validation_with_warmup"].timestamp))
+        self.assertEqual(min(split["validation_with_warmup"].timestamp), min(split["train"].timestamp))
         self.assertEqual(max(split["validation_with_warmup"].timestamp), max(split["validation"].timestamp))
         self.assertEqual(max(split["test_with_warmup"].timestamp), max(split["test"].timestamp))
 
