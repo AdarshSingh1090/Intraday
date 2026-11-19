@@ -132,6 +132,18 @@ def simulate_candidate(candidate, forward_candles, config=None):
     exit_notional = exit_price * qty
     fees = entry_notional * config.fee_rate_per_side + exit_notional * config.fee_rate_per_side + 2 * config.flat_fee_per_side
     net = gross - fees
+    entry_dt = pd.to_datetime(first.timestamp)
+    if entry_dt.tzinfo is not None:
+        entry_dt = entry_dt.tz_convert("Asia/Kolkata")
+    entry_clock = entry_dt.time()
+    if entry_clock < pd.Timestamp("10:00").time():
+        time_bucket = "OPEN_0915_1000"
+    elif entry_clock < pd.Timestamp("12:00").time():
+        time_bucket = "MORNING_1000_1200"
+    elif entry_clock < pd.Timestamp("14:00").time():
+        time_bucket = "MIDDAY_1200_1400"
+    else:
+        time_bucket = "CLOSE_1400_1530"
     return {
         "status": "SIMULATED",
         "symbol": candidate.get("symbol"),
@@ -143,6 +155,9 @@ def simulate_candidate(candidate, forward_candles, config=None):
         "confidence": candidate.get("confidence"),
         "rsi": candidate.get("rsi"),
         "relative_volume": candidate.get("relative_volume"),
+        "entry_time_bucket": time_bucket,
+        "entry_month": entry_dt.strftime("%Y-%m"),
+        "entry_weekday": entry_dt.strftime("%A"),
         "quantity": qty,
         "signal_timestamp": candidate.get("signal_timestamp"),
         "entry_timestamp": str(first.timestamp),
