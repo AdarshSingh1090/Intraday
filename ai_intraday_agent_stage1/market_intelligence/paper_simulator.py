@@ -38,6 +38,15 @@ def simulate_candidate(candidate, forward_candles, config=None):
     if not required_cols.issubset(bars.columns):
         return {"status": "REJECTED", "reason": "Forward candles missing required OHLC columns.", "paper_only": True}
     bars = bars.sort_values("timestamp").reset_index(drop=True)
+    signal_ts = candidate.get("signal_timestamp")
+    if signal_ts:
+        try:
+            signal_time = pd.to_datetime(signal_ts)
+            first_forward_time = pd.to_datetime(bars.iloc[0]["timestamp"])
+            if first_forward_time <= signal_time:
+                return {"status": "REJECTED", "reason": "Forward candles must begin strictly after the signal timestamp.", "paper_only": True}
+        except (TypeError, ValueError):
+            return {"status": "REJECTED", "reason": "Signal/forward candle timestamps could not be compared.", "paper_only": True}
     direction = candidate["direction"]
     raw_qty = float(candidate["quantity"])
     if raw_qty <= 0 or not raw_qty.is_integer():
