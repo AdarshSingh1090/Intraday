@@ -4,6 +4,7 @@ import math
 import pandas as pd
 
 from market_intelligence.performance import evaluate_performance, segment_performance
+from market_intelligence.benchmarks import benchmark_summary
 from market_intelligence.evaluation import evaluate_market_data
 from market_intelligence.strategy import generate_setup, StrategyConfig
 from market_intelligence.risk import assess_candidate, RiskConfig
@@ -197,6 +198,16 @@ def backtest(df, symbol="UNKNOWN", config=None, strategy_config=None):
         exit_idx = bars.index[bars["timestamp"] == exit_ts]
         i = max(i + 1, int(exit_idx[0]) + 1) if len(exit_idx) else i + 1
 
+    benchmark_bars = bars.copy()
+    benchmark_start_day = start_day or bars.iloc[config.warmup_bars]["timestamp"].date()
+    benchmark_bars = benchmark_bars[benchmark_bars["timestamp"].dt.date >= benchmark_start_day]
+    if end_day:
+        benchmark_bars = benchmark_bars[benchmark_bars["timestamp"].dt.date <= end_day]
+    benchmarks = benchmark_summary(
+        benchmark_bars, starting_equity=config.budget,
+        slippage_bps=config.slippage_bps_per_side,
+        fee_rate=config.fee_rate_per_side, flat_fee=config.flat_fee_per_side,
+    )
     return {
         "status": "COMPLETED",
         "symbol": symbol,
@@ -205,6 +216,7 @@ def backtest(df, symbol="UNKNOWN", config=None, strategy_config=None):
         "skipped": skipped,
         "metrics": calculate_metrics(trades, starting_equity=config.budget),
         "segments": segment_performance(trades, starting_equity=config.budget),
+        "benchmarks": benchmarks,
         "paper_only": True,
         "execution": "none",
         "disclaimer": "Historical simulation only. Results are not predictive; estimated costs and candle-based fills may differ from real execution.",
