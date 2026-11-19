@@ -81,3 +81,5 @@ python main.py backtest --file historical.csv --symbol RELIANCE --interval 5 --b
 Earlier candles are retained for indicator warm-up; only signals in the requested date range are counted. This is essential for chronological out-of-sample evaluation.
 
 - Entry-gap validation now rechecks actual reward-risk after slippage; candidates that fall below the minimum are rejected before simulation.
+
+- Chronological split utilities return validation/test datasets plus `*_with_warmup` views that include only prior history through the evaluation period's end. Run the backtester on these views with matching `start_date`/`end_date` so indicators have history without counting earlier trades.
