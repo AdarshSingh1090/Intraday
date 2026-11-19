@@ -5,6 +5,7 @@ automatically select a winning configuration.
 """
 from __future__ import annotations
 import pandas as pd
+from market_intelligence.performance import evaluate_performance
 
 
 def chronological_split(df, timestamp_col="timestamp", train_fraction=0.60, validation_fraction=0.20):
