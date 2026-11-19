@@ -28,6 +28,15 @@ class PerformanceTests(unittest.TestCase):
         self.assertEqual(segments["direction"]["LONG"]["trades"],2)
         self.assertEqual(segments["direction"]["SHORT"]["net_pnl"],-5)
 
+    def test_metrics_sort_trades_chronologically(self):
+        trades=[
+            {"net_pnl":100,"gross_pnl":100,"estimated_fees":0,"entry_timestamp":"2026-01-02 09:20"},
+            {"net_pnl":-50,"gross_pnl":-50,"estimated_fees":0,"entry_timestamp":"2026-01-01 09:20"},
+        ]
+        m=evaluate_performance(trades,1000,bootstrap_iterations=0)
+        self.assertEqual(m["max_drawdown"],50)
+        self.assertEqual(list(m["daily_net_pnl"]),["2026-01-01","2026-01-02"])
+
     def test_empty_trades(self):
         m = evaluate_performance([], 8900)
         self.assertEqual(m["trades"], 0)
