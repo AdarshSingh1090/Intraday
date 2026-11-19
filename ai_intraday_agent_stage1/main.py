@@ -442,6 +442,9 @@ def cmd_backtest(args):
         long_only=args.long_only,
         start_date=args.start_date,
         end_date=args.end_date,
+        market_timezone=args.market_timezone,
+        session_start=args.session_start,
+        session_end=args.session_end,
     )
     result = backtest(historical, symbol=args.symbol, config=cfg)
     print("\n" + "=" * 68)
@@ -902,6 +905,9 @@ def build_parser():
     bt.add_argument("--long-only", action="store_true")
     bt.add_argument("--start-date", help="Inclusive signal date (YYYY-MM-DD); earlier bars remain available for warm-up.")
     bt.add_argument("--end-date", help="Inclusive final signal/exit date (YYYY-MM-DD).")
+    bt.add_argument("--market-timezone", default="Asia/Kolkata")
+    bt.add_argument("--session-start", default="09:15")
+    bt.add_argument("--session-end", default="15:30", help="Exclusive session end.")
     bt.add_argument("--report-json", help="Optional output path for complete JSON report.")
     bt.add_argument("--trades-csv", help="Optional output path for simulated trades CSV.")
     bt.add_argument("--require-trades", action="store_true", help="Exit with code 2 if no trades are produced.")
