@@ -442,7 +442,7 @@ def cmd_backtest(args):
         long_only=args.long_only,
     )
     result = backtest(historical, symbol=args.symbol, config=cfg)
-    print("\\n" + "=" * 68)
+    print("\n" + "=" * 68)
     print("          HISTORICAL BACKTEST — RESEARCH / PAPER ONLY")
     print("=" * 68)
     print(f"Status: {result.get('status')}")
