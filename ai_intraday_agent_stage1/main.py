@@ -15,6 +15,13 @@ from market_data.yahoo import YahooProvider
 
 from data_validation import validate
 from database.store import CandleStore
+from market_intelligence.quality_gate import assess_candles, print_quality_report
+from market_intelligence.evaluation import evaluate_market_data
+from market_intelligence.strategy import generate_setup, StrategyConfig
+from market_intelligence.risk import assess_candidate, RiskConfig
+from market_intelligence.paper_simulator import simulate_candidate, SimulationConfig, PaperTradeStore
+import json
+from market_intelligence.backtester import backtest, BacktestConfig
 
 
 # =========================================================
@@ -273,6 +280,193 @@ def cmd_quality(args):
     )
 
     print_report(report)
+
+
+# =========================================================
+# NEW QUALITY GATE
+# =========================================================
+
+def cmd_quality_gate(args):
+    store = CandleStore(str(DB))
+    df = store.read(args.symbol, args.interval)
+    if df.empty:
+        print(f"No data found for {args.symbol} at {args.interval}-minute interval.")
+        return
+    report = assess_candles(
+        df,
+        interval_minutes=args.interval,
+        config=None
+    )
+    print_quality_report(report)
+    if args.require_eligible and not report["trade_eligible"]:
+        raise SystemExit(2)
+
+
+# =========================================================
+# INTEGRATED EVALUATION
+# =========================================================
+
+def cmd_evaluate(args):
+    store = CandleStore(str(DB))
+    df = store.read(args.symbol, args.interval)
+    if df.empty:
+        print(f"No data found for {args.symbol} at {args.interval}-minute interval.")
+        return
+    result = evaluate_market_data(df, interval_minutes=args.interval, symbol=args.symbol)
+    print("\n" + "=" * 58)
+    print("       DATA-GATED MARKET EVALUATION")
+    print("=" * 58)
+    print(f"Symbol: {args.symbol}")
+    print(f"Interval: {args.interval} minute(s)")
+    print(f"Status: {result['status']}")
+    print(f"Trade eligible for strategy: {'YES' if result['trade_eligible'] else 'NO'}")
+    print(f"Quality score: {result['quality']['quality_score']}/100")
+    if result['blocking_reasons']:
+        print("\nBlocking reasons:")
+        for reason in result['blocking_reasons']:
+            print(f"- {reason}")
+    if result.get('technical_analysis') and result['technical_analysis'].get('regime'):
+        regime = result['technical_analysis']['regime']
+        print("\nMarket regime:")
+        for key in ('trend', 'trend_strength', 'momentum', 'volatility'):
+            if key in regime:
+                print(f"{key}: {regime[key]}")
+    if result.get('screening') and result['screening'].get('metrics'):
+        print("\nScreening metrics:")
+        for key, value in result['screening']['metrics'].items():
+            print(f"{key}: {value}")
+    print("\\n" + result.get('warning', ''))
+    print("=" * 58)
+    if args.require_eligible and not result['trade_eligible']:
+        raise SystemExit(2)
+
+
+# =========================================================
+# STRATEGY EVALUATION (PAPER CANDIDATE ONLY)
+# =========================================================
+
+def cmd_strategy(args):
+    store = CandleStore(str(DB))
+    df = store.read(args.symbol, args.interval)
+    if df.empty:
+        print(f"No data found for {args.symbol} at {args.interval}-minute interval.")
+        return
+    evaluation = evaluate_market_data(df, interval_minutes=args.interval, symbol=args.symbol)
+    setup = generate_setup(evaluation, StrategyConfig(allow_short=not args.long_only))
+    print("\n" + "=" * 58)
+    print("        PAPER STRATEGY CANDIDATE")
+    print("=" * 58)
+    print(f"Symbol: {args.symbol}")
+    print(f"Interval: {args.interval} minute(s)")
+    print(f"Status: {setup['status']}")
+    print(f"Signal: {setup['signal']}")
+    print(f"Score: {setup['score']}/{setup['score_max']}")
+    print(f"Confidence (rule score): {setup['confidence']}%")
+    for reason in setup['reasons']:
+        print(f"+ {reason}")
+    if setup['candidate']:
+        print("\nCandidate (NOT an order):")
+        for key, value in setup['candidate'].items():
+            print(f"{key}: {value}")
+    if setup['diagnostics'].get('failed_checks'):
+        print("\nFailed checks:")
+        for reason in setup['diagnostics']['failed_checks']:
+            print(f"- {reason}")
+    if setup['status'] == 'BLOCKED':
+        print("\nBlocking reasons:")
+        for reason in setup['reasons']:
+            print(f"- {reason}")
+    print("\nPaper-only: YES | Execution: NONE")
+    print("=" * 58)
+    if args.require_candidate and setup['status'] != 'CANDIDATE':
+        raise SystemExit(2)
+
+
+# =========================================================
+# RISK CHECK (PAPER POSITION SIZE ONLY)
+# =========================================================
+
+def cmd_risk(args):
+    store = CandleStore(str(DB))
+    df = store.read(args.symbol, args.interval)
+    if df.empty:
+        print(f"No data found for {args.symbol} at {args.interval}-minute interval.")
+        return
+    evaluation = evaluate_market_data(df, interval_minutes=args.interval, symbol=args.symbol)
+    setup = generate_setup(evaluation, StrategyConfig(allow_short=not args.long_only))
+    risk = assess_candidate(
+        setup.get("candidate"),
+        RiskConfig(budget=args.budget),
+        open_exposure=args.open_exposure,
+        daily_pnl=args.daily_pnl,
+        trades_today=args.trades_today,
+    )
+    print("\n" + "=" * 58)
+    print("       PAPER RISK & POSITION SIZING")
+    print("=" * 58)
+    print(f"Symbol: {args.symbol}")
+    print(f"Strategy status: {setup['status']}")
+    print(f"Strategy signal: {setup['signal']}")
+    print(f"Risk status: {risk['status']}")
+    for key in ("quantity", "capital_required", "capital_pct_of_budget",
+                "total_risk", "risk_pct_of_budget", "risk_budget",
+                "reward_risk_ratio", "daily_loss_limit"):
+        if key in risk:
+            print(f"{key}: {risk[key]}")
+    for reason in risk.get("reasons", []):
+        print(f"- {reason}")
+    print("Paper-only: YES | Execution: NONE")
+    print("=" * 58)
+    if args.require_approved and not risk["approved"]:
+        raise SystemExit(2)
+
+
+# =========================================================
+# PAPER SIMULATION (NO EXECUTION)
+# =========================================================
+
+def cmd_paper_sim(args):
+    candidate_data = json.loads(Path(args.candidate_json).read_text(encoding="utf-8"))
+    if candidate_data.get("approved") is not True:
+        raise SystemExit("Refusing simulation: candidate JSON must contain approved=true from risk assessment.")
+    if candidate_data.get("quantity", 0) <= 0:
+        raise SystemExit("Refusing simulation: approved quantity must be positive.")
+    forward = pd.read_csv(args.forward_csv)
+    result = simulate_candidate(
+        candidate_data,
+        forward,
+        SimulationConfig(
+            slippage_bps_per_side=args.slippage_bps,
+            fee_rate_per_side=args.fee_rate,
+            flat_fee_per_side=args.flat_fee,
+        ),
+    )
+    print("\n" + "=" * 58)
+    print("            PAPER TRADE SIMULATION")
+    print("=" * 58)
+    for key in ("status", "symbol", "direction", "quantity", "entry_timestamp",
+                "entry_reference_price", "entry_fill_price", "stop_loss", "target",
+                "exit_timestamp", "exit_fill_price", "exit_reason", "gross_pnl",
+                "estimated_fees", "net_pnl", "return_on_entry_capital_pct"):
+        if key in result:
+            print(f"{key}: {result[key]}")
+    if result.get("status") == "SIMULATED" and not args.no_save:
+        trade_id = PaperTradeStore(str(DB)).save(result)
+        print(f"Saved paper trade record: #{trade_id}")
+    if result.get("cost_model_note"):
+        print(result["cost_model_note"])
+    print("PAPER ONLY | NO BROKER ORDERS")
+    print("=" * 58)
+
+
+def cmd_paper_trades(args):
+    trades = PaperTradeStore(str(DB)).read_all()
+    if trades.empty:
+        print("No paper simulation records yet.")
+        return
+    print(trades[["id", "symbol", "direction", "quantity", "entry_fill_price",
+                  "exit_fill_price", "exit_reason", "net_pnl"]].to_string(index=False))
+    print(f"Total simulated net P&L: {trades['net_pnl'].sum():.2f}")
 
 
 # =========================================================
@@ -578,6 +772,78 @@ def build_parser():
     q.set_defaults(
         func=cmd_quality
     )
+
+    # -----------------------------------------------------
+    # QUALITY GATE
+    # -----------------------------------------------------
+
+    qg = sub.add_parser("quality-gate")
+    qg.add_argument("--symbol", required=True)
+    qg.add_argument("--interval", type=int, required=True)
+    qg.add_argument("--require-eligible", action="store_true",
+                    help="Exit with code 2 when data is not trade eligible.")
+    qg.set_defaults(func=cmd_quality_gate)
+
+    # -----------------------------------------------------
+    # EVALUATE
+    # -----------------------------------------------------
+
+    ev = sub.add_parser("evaluate")
+    ev.add_argument("--symbol", required=True)
+    ev.add_argument("--interval", type=int, required=True)
+    ev.add_argument("--require-eligible", action="store_true",
+                    help="Exit with code 2 when quality gate blocks.")
+    ev.set_defaults(func=cmd_evaluate)
+
+    # -----------------------------------------------------
+    # STRATEGY
+    # -----------------------------------------------------
+
+    st = sub.add_parser("strategy")
+    st.add_argument("--symbol", required=True)
+    st.add_argument("--interval", type=int, required=True)
+    st.add_argument("--long-only", action="store_true",
+                    help="Disable short setup candidates.")
+    st.add_argument("--require-candidate", action="store_true",
+                    help="Exit with code 2 when no candidate is produced.")
+    st.set_defaults(func=cmd_strategy)
+
+    # -----------------------------------------------------
+    # RISK
+    # -----------------------------------------------------
+
+    rk = sub.add_parser("risk")
+    rk.add_argument("--symbol", required=True)
+    rk.add_argument("--interval", type=int, required=True)
+    rk.add_argument("--budget", type=float, default=8900.0)
+    rk.add_argument("--open-exposure", type=float, default=0.0,
+                    help="Current simulated open-position capital; not yet persisted.")
+    rk.add_argument("--daily-pnl", type=float, default=0.0,
+                    help="Current simulated daily P&L; not yet persisted.")
+    rk.add_argument("--trades-today", type=int, default=0,
+                    help="Current simulated trade count; not yet persisted.")
+    rk.add_argument("--long-only", action="store_true")
+    rk.add_argument("--require-approved", action="store_true")
+    rk.set_defaults(func=cmd_risk)
+
+    # -----------------------------------------------------
+    # PAPER SIMULATOR
+    # -----------------------------------------------------
+
+    ps = sub.add_parser("paper-sim")
+    ps.add_argument("--candidate-json", required=True,
+                    help="JSON containing approved risk assessment fields.")
+    ps.add_argument("--forward-csv", required=True,
+                    help="Forward candles with timestamp, open, high, low, close, volume.")
+    ps.add_argument("--slippage-bps", type=float, default=5.0)
+    ps.add_argument("--fee-rate", type=float, default=0.0003,
+                    help="Estimated fee rate per side.")
+    ps.add_argument("--flat-fee", type=float, default=0.0)
+    ps.add_argument("--no-save", action="store_true")
+    ps.set_defaults(func=cmd_paper_sim)
+
+    pt = sub.add_parser("paper-trades")
+    pt.set_defaults(func=cmd_paper_trades)
 
     # -----------------------------------------------------
     # STATUS
