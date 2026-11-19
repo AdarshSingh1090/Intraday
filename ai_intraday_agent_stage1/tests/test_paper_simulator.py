@@ -49,7 +49,7 @@ class PaperSimulatorTests(unittest.TestCase):
         candidate["risk_budget"]=20
         result=simulate_candidate(candidate,bars([["09:20",101,102,100,101,1000]]),SimulationConfig(0,0,0))
         self.assertEqual(result["status"],"REJECTED")
-        self.assertIn("actual entry risk exceed",result["reason"])
+        self.assertIn("risk exceed approved risk budget",result["reason"])
 
     def test_end_of_data_exit(self):
         result=simulate_candidate(c(),bars([["09:20",100,101,99,103,1000],["09:25",103,103,102,103,1000]]),SimulationConfig(0,0,0))
@@ -68,6 +68,31 @@ class PaperSimulatorTests(unittest.TestCase):
     def test_invalid_candidate(self):
         result=simulate_candidate({},bars([["09:20",100,101,99,100,1000]]))
         self.assertEqual(result["status"],"REJECTED")
+
+    def test_invalid_forward_ohlc_rejected(self):
+        result=simulate_candidate(c(),bars([["09:20",100,98,99,100,1000]]),SimulationConfig(0,0,0))
+        self.assertEqual(result["status"],"REJECTED")
+        self.assertIn("inconsistent OHLC",result["reason"])
+
+    def test_duplicate_forward_timestamps_rejected(self):
+        result=simulate_candidate(c(),bars([["09:20",100,101,99,100,1000],["09:20",100,101,99,100,1000]]),SimulationConfig(0,0,0))
+        self.assertEqual(result["status"],"REJECTED")
+        self.assertIn("duplicate timestamps",result["reason"])
+
+    def test_stop_risk_includes_estimated_costs_and_r_multiple(self):
+        candidate=c()
+        candidate["risk_budget"]=1000
+        result=simulate_candidate(candidate,bars([["09:20",100,105,99,104,1000]]),SimulationConfig(5,0.0003,0))
+        self.assertEqual(result["status"],"SIMULATED")
+        self.assertGreater(result["estimated_stop_risk"],0)
+        self.assertIsNotNone(result["r_multiple_net"])
+
+    def test_actual_entry_capital_limit(self):
+        candidate=c()
+        candidate["max_capital"]=1000
+        result=simulate_candidate(candidate,bars([["09:20",101,102,100,101,1000]]),SimulationConfig(0,0,0))
+        self.assertEqual(result["status"],"REJECTED")
+        self.assertIn("capital limit",result["reason"])
 
     def test_no_bars(self):
         result=simulate_candidate(c(),pd.DataFrame())
