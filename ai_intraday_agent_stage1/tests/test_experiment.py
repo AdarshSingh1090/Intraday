@@ -1,6 +1,6 @@
 import unittest
 import pandas as pd
-from market_intelligence.experiment import chronological_split, walk_forward_splits, run_parameter_sensitivity
+from market_intelligence.experiment import chronological_split, walk_forward_splits, run_parameter_sensitivity, run_walk_forward_backtests, run_multi_symbol_backtests
 
 
 def dataset(days=40):
@@ -32,6 +32,27 @@ class ExperimentTests(unittest.TestCase):
         for fold in folds:
             self.assertLess(max(fold["train"].timestamp), min(fold["validation"].timestamp))
             self.assertEqual(max(fold["validation_with_warmup"].timestamp), max(fold["validation"].timestamp))
+
+    def test_walk_forward_runner_passes_period_bounds(self):
+        class Config:
+            def __init__(self, start, end): self.start_date=start; self.end_date=end
+        calls=[]
+        def fake_backtest(data, symbol, config):
+            calls.append((config.start_date,config.end_date,len(data)))
+            return {"status":"COMPLETED","metrics":{"trades":0},"trades":[]}
+        result=run_walk_forward_backtests(dataset(30),fake_backtest,
+            lambda start,end: Config(start,end),symbol="TEST",
+            min_train_days=10,validation_days=5,step_days=5)
+        self.assertGreaterEqual(len(result["folds"]),3)
+        self.assertTrue(all(call[2] > 5 for call in calls))
+
+    def test_multi_symbol_runner(self):
+        def fake(data,symbol,config):
+            return {"status":"COMPLETED","trades":[{"net_pnl":1,"gross_pnl":1,"estimated_fees":0,"symbol":symbol}]}
+        result=run_multi_symbol_backtests({"AAA":dataset(5),"BBB":dataset(5)},fake,lambda s:None)
+        self.assertEqual(len(result["symbols"]),2)
+        self.assertEqual(len(result["combined_trades"]),2)
+        self.assertIn("not a portfolio",result["warning"])
 
     def test_invalid_split_rejected(self):
         with self.assertRaises(ValueError):
