@@ -41,6 +41,24 @@ class BacktesterTests(unittest.TestCase):
         self.assertEqual(m["profit_factor"],2.5)
         self.assertEqual(m["max_drawdown"],50)
         self.assertEqual(m["trades_per_day"],1.5)
+        self.assertEqual(m["expectancy_per_trade"],25)
+        self.assertEqual(m["ending_equity"],8925)
+        self.assertEqual(m["total_return_pct"],0.2809)
+        self.assertIsNotNone(m["expectancy_bootstrap_95_ci"])
+
+    def test_duplicate_timestamps_are_rejected_not_silently_deduplicated(self):
+        data=candles(65)
+        data.loc[1, "timestamp"] = data.loc[0, "timestamp"]
+        result=backtest(data,config=BacktestConfig(warmup_bars=60))
+        self.assertEqual(result["status"],"REJECTED")
+        self.assertIn("duplicate timestamps",result["reason"])
+
+    def test_inconsistent_ohlc_is_rejected(self):
+        data=candles(65)
+        data.loc[2, "high"] = 98
+        result=backtest(data,config=BacktestConfig(warmup_bars=60))
+        self.assertEqual(result["status"],"REJECTED")
+        self.assertIn("inconsistent OHLC",result["reason"])
 
     def test_walk_forward_uses_only_future_bars_for_fill(self):
         data=candles(65)
