@@ -105,8 +105,10 @@ def simulate_candidate(candidate, forward_candles, config=None):
     max_capital = candidate.get("max_capital")
     if _valid_num(max_capital) and entry_fill * qty > float(max_capital):
         return {"status": "REJECTED", "reason": "Opening gap/slippage makes actual entry capital exceed approved capital limit.", "paper_only": True}
-    actual_risk_per_share = abs(entry_fill - stop)
-    actual_reward_per_share = abs(target - entry_fill)
+    # Opening-gap geometry is checked on the raw open; slippage and fees are
+    # separately included in the risk-budget check and P&L cost model.
+    actual_risk_per_share = abs(entry_base - stop)
+    actual_reward_per_share = abs(target - entry_base)
     actual_reward_risk = actual_reward_per_share / actual_risk_per_share if actual_risk_per_share > 0 else 0.0
     minimum_reward_risk = float(candidate.get("minimum_reward_risk_ratio", 2.0))
     if actual_reward_risk < minimum_reward_risk:
