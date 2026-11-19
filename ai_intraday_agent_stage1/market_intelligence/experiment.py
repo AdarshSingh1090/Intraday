@@ -131,3 +131,30 @@ def run_multi_symbol_backtests(datasets, backtest_fn, config_factory):
             "symbols":symbol_results,"combined_trades":combined_trades,
             "combined_trade_metrics":evaluate_performance(combined_trades,starting_equity=8900.0,bootstrap_iterations=0),
             "warning":"Combined trade metrics are descriptive only and are not portfolio-level results."}
+
+def run_chronological_experiment(df, backtest_fn, config_factory, symbol="UNKNOWN",
+                                 train_fraction=0.60, validation_fraction=0.20,
+                                 timestamp_col="timestamp"):
+    """Evaluate train, validation, and final test chronologically.
+
+    Validation/test inputs retain earlier data for indicator warm-up, but their
+    configs restrict counted signals and exits to the respective period.
+    """
+    split=chronological_split(df,timestamp_col,train_fraction,validation_fraction)
+    ranges=split["date_ranges"]
+    periods={
+        "train": (split["train"],ranges["train"]),
+        "validation": (split["validation_with_warmup"],ranges["validation"]),
+        "test": (split["test_with_warmup"],ranges["test"]),
+    }
+    results={}
+    for name,(period_data,date_range) in periods.items():
+        start_date,end_date=date_range
+        config=config_factory(start_date,end_date)
+        result=backtest_fn(period_data,symbol=symbol,config=config)
+        results[name]={"date_range":date_range,"status":result.get("status"),
+                       "metrics":result.get("metrics",{}),"trades":result.get("trades",[]),
+                       "result":result}
+    return {"status":"COMPLETED","symbol":symbol,"splits":ranges,
+            "results":results,"method":"chronological_train_validation_test",
+            "warning":"Use validation for model/parameter selection. Treat test as final holdout and do not tune on it."}
