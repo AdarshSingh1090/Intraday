@@ -308,7 +308,7 @@ def cmd_evaluate(args):
         print(f"No data found for {args.symbol} at {args.interval}-minute interval.")
         return
     result = evaluate_market_data(df, interval_minutes=args.interval)
-    print("\\n" + "=" * 58)
+    print("\n" + "=" * 58)
     print("       DATA-GATED MARKET EVALUATION")
     print("=" * 58)
     print(f"Symbol: {args.symbol}")
@@ -317,17 +317,17 @@ def cmd_evaluate(args):
     print(f"Trade eligible for strategy: {'YES' if result['trade_eligible'] else 'NO'}")
     print(f"Quality score: {result['quality']['quality_score']}/100")
     if result['blocking_reasons']:
-        print("\\nBlocking reasons:")
+        print("\nBlocking reasons:")
         for reason in result['blocking_reasons']:
             print(f"- {reason}")
     if result.get('technical_analysis') and result['technical_analysis'].get('regime'):
         regime = result['technical_analysis']['regime']
-        print("\\nMarket regime:")
+        print("\nMarket regime:")
         for key in ('trend', 'trend_strength', 'momentum', 'volatility'):
             if key in regime:
                 print(f"{key}: {regime[key]}")
     if result.get('screening') and result['screening'].get('metrics'):
-        print("\\nScreening metrics:")
+        print("\nScreening metrics:")
         for key, value in result['screening']['metrics'].items():
             print(f"{key}: {value}")
     print("\\n" + result.get('warning', ''))
