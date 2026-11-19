@@ -21,6 +21,7 @@ from market_intelligence.strategy import generate_setup, StrategyConfig
 from market_intelligence.risk import assess_candidate, RiskConfig
 from market_intelligence.paper_simulator import simulate_candidate, SimulationConfig, PaperTradeStore
 import json
+from market_intelligence.backtester import backtest, BacktestConfig
 
 
 # =========================================================
