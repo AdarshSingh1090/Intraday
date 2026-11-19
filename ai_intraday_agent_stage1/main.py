@@ -453,19 +453,19 @@ def cmd_research(args):
         train_fraction=args.train_fraction,
         validation_fraction=args.validation_fraction,
     )
-    print("\\n" + "=" * 68)
+    print("\n" + "=" * 68)
     print("       CHRONOLOGICAL RESEARCH EXPERIMENT")
     print("=" * 68)
     print(f"Symbol: {args.symbol}")
     print(f"Split dates: {report['splits']}")
     for period,result in report["results"].items():
-        print(f"\\n{period.upper()} ({result['date_range']}):")
+        print(f"\n{period.upper()} ({result['date_range']}):")
         metrics=result.get("metrics",{})
         for key in ("trades","win_rate_pct","profit_factor","net_pnl",
                     "expectancy_per_trade","total_return_pct","max_drawdown_pct"):
             if key in metrics:
                 print(f"  {key}: {metrics[key]}")
-    print("\\nPaper-only: YES | Execution: NONE")
+    print("\nPaper-only: YES | Execution: NONE")
     print("=" * 68)
     if args.report_json:
         out=Path(args.report_json)
