@@ -79,3 +79,5 @@ Research-only. Paper simulation only. No broker API or live execution is introdu
 python main.py backtest --file historical.csv --symbol RELIANCE --interval 5 --budget 8900 --start-date 2026-01-01 --end-date 2026-03-31 --report-json reports/reliance_test.json --trades-csv reports/reliance_trades.csv
 ```
 Earlier candles are retained for indicator warm-up; only signals in the requested date range are counted. This is essential for chronological out-of-sample evaluation.
+
+- Entry-gap validation now rechecks actual reward-risk after slippage; candidates that fall below the minimum are rejected before simulation.
