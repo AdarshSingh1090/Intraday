@@ -65,3 +65,17 @@ Research-only. Paper simulation only. No broker API or live execution is introdu
 - EMA/RSI/ATR and volume averages are computed continuously across calendar/session boundaries. This may be intentional, but opening-session behavior and intraday volume seasonality need separate research.
 - Regime/strategy thresholds are hand-set and have not been statistically validated.
 - Confidence is a rule score percentage, not a calibrated probability.
+
+## Further framework additions
+- Backtest supports inclusive signal date bounds while retaining earlier candles for indicator warm-up; forward exits are bounded by the requested end date.
+- Timestamps are normalized to a configurable market timezone (default `Asia/Kolkata`); regular session is configurable (default 09:15 to 15:30, end-exclusive). Out-of-session rows are excluded and counted in the report.
+- Simulator also normalizes forward timestamps to the configured timezone.
+- Benchmark comparisons now include no-trade, buy-and-hold, and daily open-to-close baselines with the same simple estimated cost assumptions.
+- Trades retain trend/regime, score, relative volume, RSI, time bucket, month, and weekday metadata for attribution.
+- Reports include segment metrics by symbol, direction, exit reason, trend, trend strength, volatility, time-of-day, month, and weekday.
+
+## CLI
+```powershell
+python main.py backtest --file historical.csv --symbol RELIANCE --interval 5 --budget 8900 --start-date 2026-01-01 --end-date 2026-03-31 --report-json reports/reliance_test.json --trades-csv reports/reliance_trades.csv
+```
+Earlier candles are retained for indicator warm-up; only signals in the requested date range are counted. This is essential for chronological out-of-sample evaluation.
