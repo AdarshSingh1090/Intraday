@@ -35,6 +35,11 @@ class PaperSimulatorTests(unittest.TestCase):
         self.assertEqual(result["exit_reason"],"STOP_GAP")
         self.assertEqual(result["net_pnl"],-30)
 
+    def test_signal_candle_cannot_be_used_as_forward_data(self):
+        result=simulate_candidate(c(),bars([["2026-01-01 09:15",100,105,99,104,1000]]),SimulationConfig(0,0,0))
+        self.assertEqual(result["status"],"REJECTED")
+        self.assertIn("strictly after",result["reason"])
+
     def test_entry_gap_past_target_is_rejected(self):
         result=simulate_candidate(c(),bars([["09:20",105,106,104,105,1000]]),SimulationConfig(0,0,0))
         self.assertEqual(result["status"],"REJECTED")
