@@ -85,3 +85,9 @@ Earlier candles are retained for indicator warm-up; only signals in the requeste
 - Chronological split utilities return validation/test datasets plus `*_with_warmup` views that include only prior history through the evaluation period's end. Run the backtester on these views with matching `start_date`/`end_date` so indicators have history without counting earlier trades.
 
 - Added orchestration helpers for walk-forward validation and separate multi-symbol backtests. Combined multi-symbol trade statistics are explicitly descriptive and **not** a portfolio simulation (no cross-symbol capital/exposure coordination).
+
+## Automated chronological experiment CLI
+```powershell
+python main.py research --file data/processed/RELIANCE_5_candles.csv --symbol RELIANCE --interval 5 --train-fraction 0.60 --validation-fraction 0.20 --budget 8900 --report-json reports/reliance_experiment.json
+```
+This runs separate train, validation and final test periods. Validation and test keep earlier candles for indicator warm-up but restrict signals/exits to their respective date ranges. **Do not tune on the final test period.**
