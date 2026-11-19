@@ -25,6 +25,8 @@ class BacktestConfig:
     fee_rate_per_side: float = 0.0003
     flat_fee_per_side: float = 0.0
     long_only: bool = False
+    start_date: str | None = None
+    end_date: str | None = None
 
 
 def _empty_metrics(starting_equity=0.0):
@@ -126,6 +128,13 @@ def backtest(df, symbol="UNKNOWN", config=None, strategy_config=None):
     if (bars[["open", "high", "low", "close"]] <= 0).any().any() or (bars["volume"] < 0).any():
         return {"status": "REJECTED", "reason": "Historical candles contain invalid prices or negative volume.", "trades": [], "metrics": _empty_metrics(config.budget), "paper_only": True}
 
+    try:
+        start_day = pd.to_datetime(config.start_date).date() if config.start_date else None
+        end_day = pd.to_datetime(config.end_date).date() if config.end_date else None
+        if start_day and end_day and start_day > end_day:
+            raise ValueError("start_date is after end_date")
+    except (TypeError, ValueError):
+        return {"status": "REJECTED", "reason": "Invalid backtest date range.", "trades": [], "metrics": _empty_metrics(config.budget), "paper_only": True}
     trades, skipped = [], []
     daily_pnl, daily_count = {}, {}
     i = config.warmup_bars
@@ -133,12 +142,20 @@ def backtest(df, symbol="UNKNOWN", config=None, strategy_config=None):
     strat_config = strategy_config or StrategyConfig(allow_short=not config.long_only)
     while i < len(bars) - 1:
         signal_bar = bars.iloc[i]
-        day = signal_bar["timestamp"].date().isoformat()
+        signal_day = signal_bar["timestamp"].date()
+        if start_day and signal_day < start_day:
+            i += 1
+            continue
+        if end_day and signal_day > end_day:
+            break
+        day = signal_day.isoformat()
         pnl_today = daily_pnl.get(day, 0.0)
         count_today = daily_count.get(day, 0)
         # Prevent crossing session boundaries in forward simulations.
         forward = bars.iloc[i+1:].copy()
-        forward = forward[forward["timestamp"].dt.date == signal_bar["timestamp"].date()]
+        forward = forward[forward["timestamp"].dt.date == signal_day]
+        if end_day:
+            forward = forward[forward["timestamp"].dt.date <= end_day]
         if forward.empty:
             i += 1
             continue
