@@ -103,7 +103,7 @@ class BacktesterTests(unittest.TestCase):
             args=sim.call_args_list[0].args
             forward=args[1]
             self.assertGreater(pd.to_datetime(forward.iloc[0].timestamp),pd.to_datetime(fake_candidate["signal_timestamp"]))
-            self.assertEqual(pd.to_datetime(forward.iloc[0].timestamp),pd.to_datetime(data.iloc[61].timestamp))
+            self.assertEqual(pd.to_datetime(forward.iloc[0].timestamp),pd.to_datetime(data.iloc[61].timestamp).tz_localize("Asia/Kolkata"))
         self.assertEqual(result["status"],"COMPLETED")
         self.assertEqual(result["metrics"]["trades"],1)
         self.assertTrue(result["paper_only"])
