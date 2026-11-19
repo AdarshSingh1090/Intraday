@@ -1,6 +1,6 @@
 import unittest
 import pandas as pd
-from market_intelligence.experiment import chronological_split, walk_forward_splits, run_parameter_sensitivity, run_walk_forward_backtests, run_multi_symbol_backtests
+from market_intelligence.experiment import chronological_split, walk_forward_splits, run_parameter_sensitivity, run_walk_forward_backtests, run_multi_symbol_backtests, run_chronological_experiment
 
 
 def dataset(days=40):
@@ -53,6 +53,21 @@ class ExperimentTests(unittest.TestCase):
         self.assertEqual(len(result["symbols"]),2)
         self.assertEqual(len(result["combined_trades"]),2)
         self.assertIn("not portfolio-level",result["warning"])
+
+    def test_chronological_experiment_runs_three_periods_with_bounds(self):
+        class Config:
+            def __init__(self,start,end): self.start_date=start; self.end_date=end
+        seen=[]
+        def fake_backtest(data,symbol,config):
+            seen.append((config.start_date,config.end_date,len(data)))
+            return {"status":"COMPLETED","metrics":{"net_pnl":0},"trades":[]}
+        result=run_chronological_experiment(dataset(40),fake_backtest,
+            lambda start,end: Config(start,end),symbol="TEST")
+        self.assertEqual(list(result["results"]),["train","validation","test"])
+        self.assertEqual(len(seen),3)
+        self.assertLess(seen[0][1],seen[1][0])
+        self.assertLess(seen[1][1],seen[2][0])
+        self.assertGreater(seen[2][2],len(result["results"]["test"]["trades"]))
 
     def test_invalid_split_rejected(self):
         with self.assertRaises(ValueError):
