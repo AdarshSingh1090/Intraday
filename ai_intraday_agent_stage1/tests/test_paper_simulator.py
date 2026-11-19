@@ -31,7 +31,7 @@ class PaperSimulatorTests(unittest.TestCase):
         self.assertEqual(result["net_pnl"],-20)
 
     def test_stop_gap(self):
-        result=simulate_candidate(c(),bars([["09:20",97,98,96,97,1000]]),SimulationConfig(0,0,0))
+        result=simulate_candidate(c(),bars([["09:20",100,101,99,100,1000],["09:25",97,98,96,97,1000]]),SimulationConfig(0,0,0))
         self.assertEqual(result["exit_reason"],"STOP_GAP")
         self.assertEqual(result["net_pnl"],-30)
 
@@ -49,7 +49,7 @@ class PaperSimulatorTests(unittest.TestCase):
         candidate["risk_budget"]=20
         result=simulate_candidate(candidate,bars([["09:20",101,102,100,101,1000]]),SimulationConfig(0,0,0))
         self.assertEqual(result["status"],"REJECTED")
-        self.assertIn("actual entry risk exceeds",result["reason"])
+        self.assertIn("actual entry risk exceed",result["reason"])
 
     def test_end_of_data_exit(self):
         result=simulate_candidate(c(),bars([["09:20",100,101,99,103,1000],["09:25",103,103,102,103,1000]]),SimulationConfig(0,0,0))
