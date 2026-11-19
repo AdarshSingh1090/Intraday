@@ -16,6 +16,7 @@ from market_data.yahoo import YahooProvider
 from data_validation import validate
 from database.store import CandleStore
 from market_intelligence.quality_gate import assess_candles, print_quality_report
+from market_intelligence.evaluation import evaluate_market_data
 
 
 # =========================================================
@@ -293,6 +294,45 @@ def cmd_quality_gate(args):
     )
     print_quality_report(report)
     if args.require_eligible and not report["trade_eligible"]:
+        raise SystemExit(2)
+
+
+# =========================================================
+# INTEGRATED EVALUATION
+# =========================================================
+
+def cmd_evaluate(args):
+    store = CandleStore(str(DB))
+    df = store.read(args.symbol, args.interval)
+    if df.empty:
+        print(f"No data found for {args.symbol} at {args.interval}-minute interval.")
+        return
+    result = evaluate_market_data(df, interval_minutes=args.interval)
+    print("\\n" + "=" * 58)
+    print("       DATA-GATED MARKET EVALUATION")
+    print("=" * 58)
+    print(f"Symbol: {args.symbol}")
+    print(f"Interval: {args.interval} minute(s)")
+    print(f"Status: {result['status']}")
+    print(f"Trade eligible for strategy: {'YES' if result['trade_eligible'] else 'NO'}")
+    print(f"Quality score: {result['quality']['quality_score']}/100")
+    if result['blocking_reasons']:
+        print("\\nBlocking reasons:")
+        for reason in result['blocking_reasons']:
+            print(f"- {reason}")
+    if result.get('technical_analysis') and result['technical_analysis'].get('regime'):
+        regime = result['technical_analysis']['regime']
+        print("\\nMarket regime:")
+        for key in ('trend', 'trend_strength', 'momentum', 'volatility'):
+            if key in regime:
+                print(f"{key}: {regime[key]}")
+    if result.get('screening') and result['screening'].get('metrics'):
+        print("\\nScreening metrics:")
+        for key, value in result['screening']['metrics'].items():
+            print(f"{key}: {value}")
+    print("\\n" + result.get('warning', ''))
+    print("=" * 58)
+    if args.require_eligible and not result['trade_eligible']:
         raise SystemExit(2)
 
 
@@ -610,6 +650,17 @@ def build_parser():
     qg.add_argument("--require-eligible", action="store_true",
                     help="Exit with code 2 when data is not trade eligible.")
     qg.set_defaults(func=cmd_quality_gate)
+
+    # -----------------------------------------------------
+    # EVALUATE
+    # -----------------------------------------------------
+
+    ev = sub.add_parser("evaluate")
+    ev.add_argument("--symbol", required=True)
+    ev.add_argument("--interval", type=int, required=True)
+    ev.add_argument("--require-eligible", action="store_true",
+                    help="Exit with code 2 when quality gate blocks.")
+    ev.set_defaults(func=cmd_evaluate)
 
     # -----------------------------------------------------
     # STATUS
