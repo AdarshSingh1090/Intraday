@@ -6,7 +6,7 @@ from market_intelligence.analysis import analyze_market
 from market_intelligence.screener import calculate_screening_metrics
 
 
-def evaluate_market_data(df, interval_minutes=5, now=None, quality_config=None):
+def evaluate_market_data(df, interval_minutes=5, now=None, quality_config=None, symbol=None):
     """Analyze data, but mark it strategy-ineligible when the quality gate fails.
 
     This does not create a trading signal or place orders.
@@ -17,6 +17,7 @@ def evaluate_market_data(df, interval_minutes=5, now=None, quality_config=None):
     if df is None or df.empty:
         return {
             "status": "no_data",
+            "symbol": symbol,
             "trade_eligible": False,
             "quality": quality,
             "technical_analysis": None,
@@ -32,6 +33,7 @@ def evaluate_market_data(df, interval_minutes=5, now=None, quality_config=None):
     eligible = bool(quality["trade_eligible"])
     return {
         "status": "READY_FOR_STRATEGY" if eligible else "BLOCKED",
+        "symbol": symbol,
         "trade_eligible": eligible,
         "quality": quality,
         "technical_analysis": technical,
