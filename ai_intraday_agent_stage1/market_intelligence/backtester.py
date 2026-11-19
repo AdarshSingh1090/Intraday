@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import math
 import pandas as pd
 
+from market_intelligence.performance import evaluate_performance
 from market_intelligence.evaluation import evaluate_market_data
 from market_intelligence.strategy import generate_setup, StrategyConfig
 from market_intelligence.risk import assess_candidate, RiskConfig
@@ -32,10 +33,14 @@ def _empty_metrics():
         "gross_pnl": 0.0, "estimated_fees": 0.0, "net_pnl": 0.0,
         "profit_factor": 0.0, "average_win": 0.0, "average_loss": 0.0,
         "max_drawdown": 0.0, "trades_per_day": 0.0,
+        "expectancy_per_trade": 0.0, "median_trade_pnl": 0.0,
+        "max_drawdown_pct": 0.0, "total_return_pct": 0.0,
+        "ending_equity": 0.0, "average_r_multiple_net": None,
+        "expectancy_bootstrap_95_ci": None,
     }
 
 
-def calculate_metrics(trades):
+def calculate_metrics(trades, starting_equity=8900.0):
     if not trades:
         return _empty_metrics()
     pnl = [float(t.get("net_pnl", 0.0)) for t in trades]
@@ -49,6 +54,7 @@ def calculate_metrics(trades):
         peak = max(peak, equity)
         max_dd = max(max_dd, peak - equity)
     days = {str(t.get("entry_timestamp", ""))[:10] for t in trades}
+    advanced = evaluate_performance(trades, starting_equity=starting_equity)
     return {
         "trades": len(pnl), "wins": len(wins), "losses": len(losses),
         "win_rate_pct": round(len(wins) / len(pnl) * 100, 2),
@@ -60,6 +66,19 @@ def calculate_metrics(trades):
         "average_loss": round(sum(losses) / len(losses), 2) if losses else 0.0,
         "max_drawdown": round(max_dd, 2),
         "trades_per_day": round(len(pnl) / max(1, len(days)), 2),
+        "expectancy_per_trade": advanced["expectancy_per_trade"],
+        "median_trade_pnl": advanced["median_trade_pnl"],
+        "max_drawdown_pct": advanced["max_drawdown_pct"],
+        "total_return_pct": advanced["total_return_pct"],
+        "ending_equity": advanced["ending_equity"],
+        "average_r_multiple_net": advanced["average_r_multiple_net"],
+        "daily_sharpe_annualized": advanced["daily_sharpe_annualized"],
+        "daily_sortino_annualized": advanced["daily_sortino_annualized"],
+        "calmar_ratio_approx": advanced["calmar_ratio_approx"],
+        "expectancy_bootstrap_95_ci": advanced["expectancy_bootstrap_95_ci"],
+        "daily_net_pnl": advanced["daily_net_pnl"],
+        "equity_curve": advanced["equity_curve"],
+        "warnings": advanced["warnings"],
     }
 
 
@@ -73,10 +92,17 @@ def backtest(df, symbol="UNKNOWN", config=None, strategy_config=None):
         return {"status": "REJECTED", "reason": "Historical data missing required OHLCV columns.", "trades": [], "metrics": _empty_metrics(), "paper_only": True}
     bars = df.copy()
     bars["timestamp"] = pd.to_datetime(bars["timestamp"], errors="coerce")
-    bars = bars.dropna(subset=["timestamp"]).sort_values("timestamp").drop_duplicates("timestamp").reset_index(drop=True)
     for col in ("open", "high", "low", "close", "volume"):
         bars[col] = pd.to_numeric(bars[col], errors="coerce")
-    bars = bars.dropna(subset=["open", "high", "low", "close", "volume"]).reset_index(drop=True)
+    if bars[required].isna().any().any():
+        return {"status": "REJECTED", "reason": "Historical candles contain invalid timestamps or missing/non-numeric OHLCV values.", "trades": [], "metrics": _empty_metrics(), "paper_only": True}
+    if bars["timestamp"].duplicated().any():
+        return {"status": "REJECTED", "reason": "Historical candles contain duplicate timestamps.", "trades": [], "metrics": _empty_metrics(), "paper_only": True}
+    bars = bars.sort_values("timestamp").reset_index(drop=True)
+    o, h, l, cl = (bars[col] for col in ("open", "high", "low", "close"))
+    invalid_ohlc = (h < bars[["open", "close", "low"]].max(axis=1)) | (l > bars[["open", "close"]].min(axis=1))
+    if invalid_ohlc.any():
+        return {"status": "REJECTED", "reason": "Historical candles contain inconsistent OHLC relationships.", "trades": [], "metrics": _empty_metrics(), "paper_only": True}
     if len(bars) <= config.warmup_bars + 1:
         return {"status": "REJECTED", "reason": "Insufficient candles for warm-up and forward simulation.", "trades": [], "metrics": _empty_metrics(), "paper_only": True}
     if (bars[["open", "high", "low", "close"]] <= 0).any().any() or (bars["volume"] < 0).any():
@@ -121,6 +147,7 @@ def backtest(df, symbol="UNKNOWN", config=None, strategy_config=None):
             continue
         approved = dict(setup["candidate"])
         approved.update({k: risk[k] for k in ("quantity", "risk_budget") if k in risk})
+        approved["max_capital"] = config.budget * config.max_capital_per_trade_pct / 100
         approved["approved"] = True
         sim = simulate_candidate(approved, forward, sim_config)
         if sim.get("status") != "SIMULATED":
@@ -141,7 +168,7 @@ def backtest(df, symbol="UNKNOWN", config=None, strategy_config=None):
         "config": config.__dict__,
         "trades": trades,
         "skipped": skipped,
-        "metrics": calculate_metrics(trades),
+        "metrics": calculate_metrics(trades, starting_equity=config.budget),
         "paper_only": True,
         "execution": "none",
         "disclaimer": "Historical simulation only. Results are not predictive; estimated costs and candle-based fills may differ from real execution.",
