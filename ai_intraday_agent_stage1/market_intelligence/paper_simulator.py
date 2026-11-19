@@ -39,7 +39,10 @@ def simulate_candidate(candidate, forward_candles, config=None):
         return {"status": "REJECTED", "reason": "Forward candles missing required OHLC columns.", "paper_only": True}
     bars = bars.sort_values("timestamp").reset_index(drop=True)
     direction = candidate["direction"]
-    qty = int(candidate["quantity"])
+    raw_qty = float(candidate["quantity"])
+    if raw_qty <= 0 or not raw_qty.is_integer():
+        return {"status": "REJECTED", "reason": "Quantity must be a positive whole number.", "paper_only": True}
+    qty = int(raw_qty)
     ref = float(candidate["entry_reference_price"])
     stop = float(candidate["stop_loss"])
     target = float(candidate["target"])
@@ -54,6 +57,12 @@ def simulate_candidate(candidate, forward_candles, config=None):
     first = bars.iloc[0]
     entry_base = float(first["open"])
     entry_fill = entry_base * (1 + slip if direction == "LONG" else 1 - slip)
+    # Avoid entering after a signal has already been invalidated or reached its target.
+    if (direction == "LONG" and (entry_base <= stop or entry_base >= target)) or (direction == "SHORT" and (entry_base >= stop or entry_base <= target)):
+        return {"status": "REJECTED", "reason": "Forward opening price crossed stop or target before simulated entry; setup is no longer valid.", "paper_only": True}
+    risk_budget = candidate.get("risk_budget")
+    if _valid_num(risk_budget) and qty * abs(entry_fill - stop) > float(risk_budget):
+        return {"status": "REJECTED", "reason": "Opening gap/slippage makes actual entry risk exceed the approved risk budget.", "paper_only": True}
     exit_price = None
     exit_reason = None
     exit_ts = None
