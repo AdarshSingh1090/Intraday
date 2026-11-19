@@ -81,10 +81,14 @@ def generate_setup(evaluation, config=None):
     momentum = regime.get("momentum", "unknown")
     volatility = regime.get("volatility", "unknown")
 
+    strength_rank = {"weak": 1, "moderate": 2, "strong": 3}
+    required_rank = strength_rank.get(config.minimum_trend_strength, 2)
+    current_rank = strength_rank.get(strength, 0)
+
     direction = None
-    if trend == "bullish" and strength in ("moderate", "strong") and config.minimum_trend_strength in ("moderate", "strong"):
+    if trend == "bullish" and current_rank >= required_rank:
         direction = "LONG"
-    elif config.allow_short and trend == "bearish" and strength in ("moderate", "strong"):
+    elif config.allow_short and trend == "bearish" and current_rank >= required_rank:
         direction = "SHORT"
     if direction is None:
         return _no_trade("NO_SETUP", ["Trend is not aligned with an allowed strategy direction."],
@@ -114,7 +118,7 @@ def generate_setup(evaluation, config=None):
 
     if score < config.minimum_score:
         return _no_trade("NO_SETUP", ["Setup score below threshold.", *failed],
-                        {"direction": direction, "score": score, "confidence": confidence,
+                        {"direction": direction, "score": score, "confidence": confidence,\n        "confidence_type": "rule_score_percentage_not_probability",
                          "passed_checks": reasons, "failed_checks": failed})
 
     entry_reference = close
