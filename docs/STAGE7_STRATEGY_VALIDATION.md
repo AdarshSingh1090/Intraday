@@ -50,3 +50,18 @@ Research-only. Paper simulation only. No broker API or live execution is introdu
 3. Harden historical input validation and session controls.
 4. Add benchmark, period, symbol, side, and regime breakdowns.
 5. Add chronological experiment runner and CLI report/export.
+
+## Stage 7 implementation status (current draft)
+- `performance.py`: equity-based return/drawdown, expectancy, median trade, win/loss ratio, daily P&L, daily Sharpe/Sortino (caveated), approximate Calmar, R multiples, deterministic trade bootstrap interval.
+- `experiment.py`: chronological split by trading date, expanding/rolling walk-forward fold generator, and parameter sensitivity runner.
+- Backtester now rejects invalid/missing OHLCV, duplicate timestamps, inconsistent OHLC, and invalid configuration rather than silently removing or deduplicating rows.
+- Paper simulator now rejects malformed forward bars and duplicate timestamps, checks stop-loss risk with estimated slippage and fees, and enforces a supplied actual-entry capital ceiling.
+- CLI backtest command added with optional JSON report and trade CSV export.
+- Initial CI run failed on two pre-existing test fixtures that contained invalid OHLC (close above high; short candle high below open). The fixtures were corrected to valid OHLC; subsequent run for that commit passed. Newer Stage 7 commits are still being checked.
+
+## Additional causal indicator audit
+- EMA, RSI, ATR, price returns, EMA slope and rolling volume calculations use current/prior rows only; no explicit future-row lookups found in these calculations.
+- Relative volume denominator currently uses a 20-bar rolling mean **including the current candle**, which is causal but can dilute the current volume spike. A prior-20-bar baseline should be tested as a separate variant.
+- EMA/RSI/ATR and volume averages are computed continuously across calendar/session boundaries. This may be intentional, but opening-session behavior and intraday volume seasonality need separate research.
+- Regime/strategy thresholds are hand-set and have not been statistically validated.
+- Confidence is a rule score percentage, not a calibrated probability.
