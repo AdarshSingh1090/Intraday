@@ -203,6 +203,7 @@ def backtest(df, symbol="UNKNOWN", config=None, strategy_config=None):
         approved = dict(setup["candidate"])
         approved.update({k: risk[k] for k in ("quantity", "risk_budget") if k in risk})
         approved["max_capital"] = config.budget * config.max_capital_per_trade_pct / 100
+        approved["minimum_reward_risk_ratio"] = risk_cfg.minimum_reward_risk_ratio
         approved["approved"] = True
         sim = simulate_candidate(approved, forward, sim_config)
         if sim.get("status") != "SIMULATED":
