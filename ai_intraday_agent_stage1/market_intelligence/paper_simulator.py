@@ -28,8 +28,8 @@ def simulate_candidate(candidate, forward_candles, config=None):
     target price. If neither exit is hit, close at final candle close.
     """
     config = config or SimulationConfig()
-    required = ("direction", "entry_reference_price", "stop_loss", "target", "quantity")
-    if not candidate or any(k not in candidate or not _valid_num(candidate[k]) for k in required):
+    required = ("entry_reference_price", "stop_loss", "target", "quantity")
+    if not candidate or any(k not in candidate or not _valid_num(candidate[k]) for k in required) or candidate.get("direction") not in ("LONG", "SHORT"):
         return {"status": "REJECTED", "reason": "Candidate is missing required numeric fields.", "paper_only": True}
     if not isinstance(forward_candles, pd.DataFrame) or forward_candles.empty:
         return {"status": "REJECTED", "reason": "No forward candles supplied.", "paper_only": True}
