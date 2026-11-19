@@ -37,6 +37,20 @@ def simulate_candidate(candidate, forward_candles, config=None):
     required_cols = {"timestamp", "open", "high", "low", "close"}
     if not required_cols.issubset(bars.columns):
         return {"status": "REJECTED", "reason": "Forward candles missing required OHLC columns.", "paper_only": True}
+    bars["timestamp"] = pd.to_datetime(bars["timestamp"], errors="coerce")
+    for col in ("open", "high", "low", "close"):
+        bars[col] = pd.to_numeric(bars[col], errors="coerce")
+    if bars[["timestamp", "open", "high", "low", "close"]].isna().any().any():
+        return {"status": "REJECTED", "reason": "Forward candles contain invalid timestamps or numeric OHLC values.", "paper_only": True}
+    if bars["timestamp"].duplicated().any():
+        return {"status": "REJECTED", "reason": "Forward candles contain duplicate timestamps.", "paper_only": True}
+    if (bars[["open", "high", "low", "close"]] <= 0).any().any():
+        return {"status": "REJECTED", "reason": "Forward candles contain nonpositive prices.", "paper_only": True}
+    invalid_ohlc = ((bars["high"] < bars[["open", "close", "low"]].max(axis=1)) |
+                    (bars["low"] > bars[["open", "close"]].min(axis=1))
+                    )
+    if invalid_ohlc.any():
+        return {"status": "REJECTED", "reason": "Forward candles contain inconsistent OHLC relationships.", "paper_only": True}
     bars = bars.sort_values("timestamp").reset_index(drop=True)
     signal_ts = candidate.get("signal_timestamp")
     if signal_ts:
@@ -70,8 +84,15 @@ def simulate_candidate(candidate, forward_candles, config=None):
     if (direction == "LONG" and (entry_base <= stop or entry_base >= target)) or (direction == "SHORT" and (entry_base >= stop or entry_base <= target)):
         return {"status": "REJECTED", "reason": "Forward opening price crossed stop or target before simulated entry; setup is no longer valid.", "paper_only": True}
     risk_budget = candidate.get("risk_budget")
-    if _valid_num(risk_budget) and qty * abs(entry_fill - stop) > float(risk_budget):
-        return {"status": "REJECTED", "reason": "Opening gap/slippage makes actual entry risk exceed the approved risk budget.", "paper_only": True}
+    stop_fill = stop * (1 - slip if direction == "LONG" else 1 + slip)
+    estimated_stop_loss = abs(entry_fill - stop_fill) * qty
+    estimated_stop_fees = (entry_fill * qty + stop_fill * qty) * config.fee_rate_per_side + 2 * config.flat_fee_per_side
+    estimated_stop_risk = estimated_stop_loss + estimated_stop_fees
+    if _valid_num(risk_budget) and estimated_stop_risk > float(risk_budget):
+        return {"status": "REJECTED", "reason": "Opening gap, slippage and estimated stop costs make risk exceed approved risk budget.", "paper_only": True}
+    max_capital = candidate.get("max_capital")
+    if _valid_num(max_capital) and entry_fill * qty > float(max_capital):
+        return {"status": "REJECTED", "reason": "Opening gap/slippage makes actual entry capital exceed approved capital limit.", "paper_only": True}
     exit_price = None
     exit_reason = None
     exit_ts = None
@@ -129,6 +150,10 @@ def simulate_candidate(candidate, forward_candles, config=None):
         "estimated_fees": round(fees, 2),
         "net_pnl": round(net, 2),
         "return_on_entry_capital_pct": round(net / entry_notional * 100, 4) if entry_notional else 0.0,
+        "estimated_stop_risk": round(estimated_stop_risk, 2),
+        "r_multiple_net": round(net / estimated_stop_risk, 4) if estimated_stop_risk > 0 else None,
+        "entry_notional": round(entry_notional, 2),
+        "exit_notional": round(exit_notional, 2),
         "paper_only": True,
         "execution": "none",
         "cost_model_note": "Estimated fees and slippage only; not actual exchange/broker charges.",
