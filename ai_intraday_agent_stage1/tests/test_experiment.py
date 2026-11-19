@@ -52,7 +52,7 @@ class ExperimentTests(unittest.TestCase):
         result=run_multi_symbol_backtests({"AAA":dataset(5),"BBB":dataset(5)},fake,lambda s:None)
         self.assertEqual(len(result["symbols"]),2)
         self.assertEqual(len(result["combined_trades"]),2)
-        self.assertIn("not a portfolio",result["warning"])
+        self.assertIn("not portfolio-level",result["warning"])
 
     def test_invalid_split_rejected(self):
         with self.assertRaises(ValueError):
