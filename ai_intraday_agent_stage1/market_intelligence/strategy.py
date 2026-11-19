@@ -116,6 +116,15 @@ def generate_setup(evaluation, config=None):
     failed = [description for passed, description in checks if not passed]
     confidence = round(score / len(checks) * 100, 1)
 
+    # RSI and relative volume are hard filters; a high overall score cannot
+    # compensate for weak momentum positioning or insufficient participation.
+    hard_filter_failures = [checks[index][1] for index in (1, 3) if not checks[index][0]]
+    if hard_filter_failures:
+        return _no_trade("NO_SETUP", ["Hard filter failed.", *hard_filter_failures],
+                        {"direction": direction, "score": score, "confidence": confidence,
+                         "passed_checks": reasons, "failed_checks": failed,
+                         "hard_filter_failures": hard_filter_failures})
+
     if score < config.minimum_score:
         return _no_trade("NO_SETUP", ["Setup score below threshold.", *failed],
                         {"direction": direction, "score": score, "confidence": confidence,
