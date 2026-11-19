@@ -85,6 +85,17 @@ class StrategyTests(unittest.TestCase):
         result=generate_setup(make_evaluation("SHORT"),config=StrategyConfig(allow_short=False))
         self.assertEqual(result["signal"],"NO_TRADE")
 
+    def test_minimum_strong_trend_is_enforced(self):
+        evaluation = make_evaluation("LONG")
+        evaluation["technical_analysis"]["regime"]["trend_strength"] = "moderate"
+        result = generate_setup(evaluation, config=StrategyConfig(minimum_trend_strength="strong"))
+        self.assertEqual(result["signal"], "NO_TRADE")
+
+    def test_confidence_is_not_probability(self):
+        result = generate_setup(make_evaluation("LONG"))
+        self.assertEqual(result["confidence_type"], "rule_score_percentage_not_probability")
+        self.assertEqual(result["candidate"]["confidence_type"], "rule_score_percentage_not_probability")
+
 
 if __name__ == "__main__":
     unittest.main()
