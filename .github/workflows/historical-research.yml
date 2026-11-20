@@ -70,6 +70,15 @@ jobs:
             --symbols RELIANCE.NS,TCS.NS,INFY.NS,HDFCBANK.NS,ICICIBANK.NS,SBIN.NS,AXISBANK.NS,KOTAKBANK.NS,BHARTIARTL.NS,ITC.NS \
             --session-end 15:15 \
             --output reports/yahoo_alternate_interval_probe.json
+      - name: Probe public Hugging Face 1-minute dataset for exact recovery candidates
+        continue-on-error: true
+        run: |
+          mkdir -p reports
+          python -m market_intelligence.huggingface_minute_probe \
+            --directory data/research \
+            --symbols RELIANCE.NS,TCS.NS,INFY.NS,HDFCBANK.NS,ICICIBANK.NS,SBIN.NS,AXISBANK.NS,KOTAKBANK.NS,BHARTIARTL.NS,ITC.NS \
+            --session-end 15:15 \
+            --output reports/huggingface_minute_probe.json
       - name: Compare yfinance history/download interfaces for recurring missing timestamps
         run: |
           mkdir -p reports
