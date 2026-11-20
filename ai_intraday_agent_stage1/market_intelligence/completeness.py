@@ -229,16 +229,36 @@ def audit_research_directory(
                 "extra_timestamps_vs_reference": len(ts_set - reference_completed),
                 "matched_timestamps": len(reference_completed & ts_set),
             }
+        aggregate_issues = []
+        for symbol, entry in symbols.items():
+            audit = entry["completeness"]
+            if not audit["eligible"]:
+                issue_types = []
+                if audit["missing_bars"]:
+                    issue_types.append("missing bars")
+                if audit["misaligned_bars"]:
+                    issue_types.append("misaligned timestamps")
+                if audit["outside_session_bars"]:
+                    issue_types.append("outside-session bars")
+                if any(date["duplicate_bars"] for date in audit["per_date"].values()):
+                    issue_types.append("duplicate timestamps")
+                aggregate_issues.append(
+                    f"{symbol}: completeness audit failed ({', '.join(issue_types) or 'see per-date issues'})"
+                )
+            sync = synchronization[symbol]
+            if sync["missing_reference_timestamps"] or sync["extra_timestamps_vs_reference"]:
+                aggregate_issues.append(
+                    f"{symbol}: timestamp synchronization mismatch vs {chosen} "
+                    f"(missing={sync['missing_reference_timestamps']}, "
+                    f"extra={sync['extra_timestamps_vs_reference']})"
+                )
         report = {
-            "eligible": all(e["completeness"]["eligible"] for e in symbols.values())
-                        and all(v["missing_reference_timestamps"] == 0
-                                and v["extra_timestamps_vs_reference"] == 0
-                                for v in synchronization.values()),
+            "eligible": not aggregate_issues,
             "symbols": {s: {k: v for k, v in e.items() if k != "timestamps"}
                         for s, e in symbols.items()},
             "reference_symbol": chosen,
             "synchronization": synchronization,
-            "issues": [],
+            "issues": aggregate_issues,
             "as_of_timestamp": str(as_of_ts),
             "synchronization_scope": "completed bars only; unfinished current-session bars excluded",
             "note": "Cross-symbol comparison uses a reference dataset; it is not an exchange calendar.",
