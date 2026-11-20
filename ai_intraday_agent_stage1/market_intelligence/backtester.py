@@ -157,6 +157,18 @@ def backtest(df, symbol="UNKNOWN", config=None, strategy_config=None):
         return {"status": "REJECTED", "reason": "Invalid backtest date range.", "trades": [], "metrics": _empty_metrics(config.budget), "paper_only": True}
     trades, skipped = [], []
     daily_pnl, daily_count = {}, {}
+    diagnostics = {
+        "evaluation_windows": 0,
+        "quality_blocked_windows": 0,
+        "quality_blocking_reason_counts": {},
+        "setup_status_counts": {},
+        "setup_reason_counts": {},
+        "candidate_setups": 0,
+        "risk_rejected": 0,
+        "risk_rejection_reason_counts": {},
+        "simulation_rejected": 0,
+        "simulation_rejection_reason_counts": {},
+    }
     i = config.warmup_bars
     sim_config = SimulationConfig(config.slippage_bps_per_side, config.fee_rate_per_side, config.flat_fee_per_side, config.market_timezone)
     strat_config = strategy_config or StrategyConfig(allow_short=not config.long_only)
@@ -183,10 +195,26 @@ def backtest(df, symbol="UNKNOWN", config=None, strategy_config=None):
         window = bars.iloc[:i+1].copy()
         quality_cfg = QualityConfig(freshness_minutes=10**9, recent_window=min(20, len(window)), minimum_recent_quality=0.0)
         evaluation = evaluate_market_data(window, interval_minutes=config.interval_minutes, now=signal_bar["timestamp"], quality_config=quality_cfg, symbol=symbol)
+        diagnostics["evaluation_windows"] += 1
+        if not evaluation.get("trade_eligible", False):
+            diagnostics["quality_blocked_windows"] += 1
+            for reason in evaluation.get("blocking_reasons", []) or []:
+                key = str(reason)
+                diagnostics["quality_blocking_reason_counts"][key] = diagnostics["quality_blocking_reason_counts"].get(key, 0) + 1
         setup = generate_setup(evaluation, strat_config)
-        if setup.get("status") != "CANDIDATE":
+        setup_status = str(setup.get("status", "UNKNOWN"))
+        diagnostics["setup_status_counts"][setup_status] = diagnostics["setup_status_counts"].get(setup_status, 0) + 1
+        for reason in setup.get("reasons", []) or []:
+            key = str(reason)
+            diagnostics["setup_reason_counts"][key] = diagnostics["setup_reason_counts"].get(key, 0) + 1
+        setup_details = setup.get("diagnostics", {}) or {}
+        for reason in setup_details.get("failed_checks", []) or setup_details.get("hard_filter_failures", []) or []:
+            key = str(reason)
+            diagnostics["setup_reason_counts"][key] = diagnostics["setup_reason_counts"].get(key, 0) + 1
+        if setup_status != "CANDIDATE":
             i += 1
             continue
+        diagnostics["candidate_setups"] += 1
         risk_cfg = RiskConfig(
             budget=config.budget,
             risk_per_trade_pct=config.risk_per_trade_pct,
@@ -197,6 +225,10 @@ def backtest(df, symbol="UNKNOWN", config=None, strategy_config=None):
         )
         risk = assess_candidate(setup["candidate"], risk_cfg, open_exposure=0, daily_pnl=pnl_today, trades_today=count_today)
         if not risk.get("approved"):
+            diagnostics["risk_rejected"] += 1
+            for reason in risk.get("reasons", []) or []:
+                key = str(reason)
+                diagnostics["risk_rejection_reason_counts"][key] = diagnostics["risk_rejection_reason_counts"].get(key, 0) + 1
             skipped.append({"timestamp": str(signal_bar["timestamp"]), "reason": risk.get("reasons", [])})
             i += 1
             continue
@@ -207,6 +239,9 @@ def backtest(df, symbol="UNKNOWN", config=None, strategy_config=None):
         approved["approved"] = True
         sim = simulate_candidate(approved, forward, sim_config)
         if sim.get("status") != "SIMULATED":
+            diagnostics["simulation_rejected"] += 1
+            reason = str(sim.get("reason", "simulation rejected"))
+            diagnostics["simulation_rejection_reason_counts"][reason] = diagnostics["simulation_rejection_reason_counts"].get(reason, 0) + 1
             skipped.append({"timestamp": str(signal_bar["timestamp"]), "reason": sim.get("reason", "simulation rejected")})
             i += 1
             continue
@@ -234,6 +269,7 @@ def backtest(df, symbol="UNKNOWN", config=None, strategy_config=None):
         "config": config.__dict__,
         "trades": trades,
         "skipped": skipped,
+        "diagnostics": diagnostics,
         "metrics": calculate_metrics(trades, starting_equity=config.budget),
         "segments": segment_performance(
             trades, group_by=("symbol", "direction", "exit_reason", "trend",
