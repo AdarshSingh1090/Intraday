@@ -63,14 +63,18 @@ def audit_intraday_completeness(
     if not (start_time < end_time <= post_end_time):
         raise ValueError("session_start must be before session_end, and session_end must not exceed post_session_end")
     if frame is None or frame.empty:
-        return {"eligible": False, "rows": 0, "observed_dates": 0, "expected_bars_on_observed_dates": 0, "missing_bars": 0, "post_session_observations_excluded": 0, "issues": ["empty dataset"], "per_date": {}}
+        return {"eligible": False, "rows": 0, "observed_dates": 0, "expected_bars_on_observed_dates": 0, "missing_bars": 0, "invalid_timestamps": 0, "post_session_observations_excluded": 0, "issues": ["empty dataset"], "per_date": {}}
     if "timestamp" not in frame.columns:
-        return {"eligible": False, "rows": len(frame), "observed_dates": 0, "expected_bars_on_observed_dates": 0, "missing_bars": 0, "post_session_observations_excluded": 0, "issues": ["missing timestamp column"], "per_date": {}}
+        return {"eligible": False, "rows": len(frame), "observed_dates": 0, "expected_bars_on_observed_dates": 0, "missing_bars": 0, "invalid_timestamps": len(frame), "post_session_observations_excluded": 0, "issues": ["missing timestamp column"], "per_date": {}}
     as_of_ts = _as_of_timestamp(as_of)
-    ts = _to_market_time(frame["timestamp"]).dropna()
+    ts_all = _to_market_time(frame["timestamp"])
+    invalid_timestamps = int(ts_all.isna().sum())
+    ts = ts_all.dropna()
     if ts.empty:
-        return {"eligible": False, "rows": len(frame), "observed_dates": 0, "expected_bars_on_observed_dates": 0, "missing_bars": 0, "post_session_observations_excluded": 0, "issues": ["no valid timestamps"], "per_date": {}}
-    per_date, issues = {}, []
+        timestamp_issues = [f"invalid timestamps: {invalid_timestamps}"] if invalid_timestamps else []
+        timestamp_issues.append("no valid timestamps")
+        return {"eligible": False, "rows": len(frame), "observed_dates": 0, "expected_bars_on_observed_dates": 0, "missing_bars": 0, "invalid_timestamps": invalid_timestamps, "post_session_observations_excluded": 0, "issues": timestamp_issues, "per_date": {}}
+    per_date, issues = {}, ([f"invalid timestamps: {invalid_timestamps}"] if invalid_timestamps else [])
     expected_total = missing_total = misaligned_total = outside_total = 0
     uncompleted_total = post_session_total = 0
     full_session_bars = len(pd.date_range(pd.Timestamp(f"2000-01-03 {session_start}", tz=TIMEZONE), pd.Timestamp(f"2000-01-03 {session_end}", tz=TIMEZONE), freq=f"{interval_minutes}min", inclusive="left"))
@@ -128,7 +132,7 @@ def audit_intraday_completeness(
         "observed_bars_in_session":sum(v["observed_bars_in_session"] for v in per_date.values()),
         "observed_completed_bars":sum(v["observed_completed_bars"] for v in per_date.values()),
         "uncompleted_bars_excluded":uncompleted_total,"post_session_observations_excluded":post_session_total,
-        "missing_bars":missing_total,"misaligned_bars":misaligned_total,"outside_session_bars":outside_total,
+        "missing_bars":missing_total,"invalid_timestamps":invalid_timestamps,"misaligned_bars":misaligned_total,"outside_session_bars":outside_total,
         "issues":issues,"per_date":per_date,
         "note":"Audits observed dates only; excludes post-session/auction observations from continuous-session coverage; does not infer holidays or missing whole trading sessions and never fills gaps."}
 
@@ -201,6 +205,8 @@ def audit_research_directory(
                 issue_types = []
                 if audit["missing_bars"]:
                     issue_types.append("missing bars")
+                if audit.get("invalid_timestamps"):
+                    issue_types.append("invalid timestamps")
                 if audit["misaligned_bars"]:
                     issue_types.append("misaligned timestamps")
                 if audit["outside_session_bars"]:
@@ -262,6 +268,7 @@ def audit_research_directory(
                 "eligible": research_eligible,
                 "completeness": {
                     "missing_bars": completeness["missing_bars"],
+                    "invalid_timestamps": completeness.get("invalid_timestamps", 0),
                     "misaligned_bars": completeness["misaligned_bars"],
                     "outside_session_bars": completeness["outside_session_bars"],
                     "post_session_observations_excluded": completeness["post_session_observations_excluded"],

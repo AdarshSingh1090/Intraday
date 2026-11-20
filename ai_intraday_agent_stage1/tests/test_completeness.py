@@ -21,7 +21,26 @@ class CompletenessAuditTests(unittest.TestCase):
         self.assertEqual(report["missing_bars"], 0)
         self.assertFalse(report["per_date"]["2026-01-05"]["partial_session"])
 
-    def test_missing_bar_in_completed_session_is_detected(self):
+    def test_invalid_timestamp_row_blocks_completeness(self):
+        frame = self.full_session()
+        frame.loc[20, "timestamp"] = "not-a-timestamp"
+        report = audit_intraday_completeness(frame, 5, as_of="2026-01-05 16:00+05:30")
+        self.assertFalse(report["eligible"])
+        self.assertEqual(report["invalid_timestamps"], 1)
+        self.assertEqual(report["missing_bars"], 1)
+        self.assertTrue(any("invalid timestamps: 1" in issue for issue in report["issues"]))
+
+    def test_directory_audit_propagates_invalid_timestamp_blocker(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            frame = self.full_session()
+            frame.loc[20, "timestamp"] = "not-a-timestamp"
+            frame.to_csv(Path(tmp, "A.csv"), index=False)
+            report = audit_research_directory(tmp, 5, "A", as_of="2026-01-05 16:00+05:30")
+            self.assertFalse(report["eligible"])
+            self.assertEqual(report["symbols"]["A"]["completeness"]["invalid_timestamps"], 1)
+            self.assertTrue(any("invalid timestamps" in issue for issue in report["issues"]))
+
+    def test_missing_bar_in_completed_session_is_detected(self)
         frame = self.full_session().drop(index=20).reset_index(drop=True)
         report = audit_intraday_completeness(frame, 5, as_of="2026-01-05 16:00+05:30")
         self.assertFalse(report["eligible"])

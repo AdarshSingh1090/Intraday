@@ -103,6 +103,7 @@ jobs:
               "symbols": {
                   name: {
                       "missing_bars": item.get("completeness", {}).get("missing_bars"),
+                      "invalid_timestamps": item.get("completeness", {}).get("invalid_timestamps"),
                       "misaligned_bars": item.get("completeness", {}).get("misaligned_bars"),
                       "outside_session_bars": item.get("completeness", {}).get("outside_session_bars"),
                       "eligible": item.get("completeness", {}).get("eligible"),
