@@ -559,6 +559,23 @@ def cmd_research(args):
                     "expectancy_per_trade","total_return_pct","max_drawdown_pct"):
             if key in metrics:
                 print(f"  {key}: {metrics[key]}")
+        backtest_result = result.get("result", {}) or {}
+        diagnostics = backtest_result.get("diagnostics", {}) or {}
+        if diagnostics:
+            print("  Backtest diagnostics:")
+            for key in ("evaluation_windows", "quality_blocked_windows", "candidate_setups",
+                        "risk_rejected", "simulation_rejected"):
+                print(f"    {key}: {diagnostics.get(key, 0)}")
+            for label, counter_key in (
+                ("quality blockers", "quality_blocking_reason_counts"),
+                ("setup rejection reasons", "setup_reason_counts"),
+                ("risk rejection reasons", "risk_rejection_reason_counts"),
+                ("simulation rejection reasons", "simulation_rejection_reason_counts"),
+            ):
+                counts = diagnostics.get(counter_key, {}) or {}
+                if counts:
+                    top = sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:5]
+                    print(f"    {label}: " + "; ".join(f"{reason} ({count})" for reason, count in top))
     print("\nPaper-only: YES | Execution: NONE")
     print("=" * 68)
     if args.report_json:
