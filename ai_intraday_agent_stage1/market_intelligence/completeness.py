@@ -266,4 +266,52 @@ def audit_research_directory(
     out_path = root / "completeness_audit.json"
     out_path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
     report["report_file"] = str(out_path)
+
+    # Keep the acquisition manifest's simple OHLCV-validity audit separate,
+    # but make research eligibility reflect the full completeness/sync audit.
+    manifest_path = root / "manifest.json"
+    if manifest_path.exists() and symbols:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest_results = manifest.get("results", {})
+        eligible_count = 0
+        for file_symbol, entry in symbols.items():
+            symbol = file_symbol
+            for suffix in (f"_{interval_minutes}m", "_5m", "_1m"):
+                if symbol.endswith(suffix):
+                    symbol = symbol[:-len(suffix)]
+                    break
+            result_entry = manifest_results.get(symbol)
+            if result_entry is None:
+                continue
+            completeness = entry["completeness"]
+            sync = synchronization[file_symbol]
+            research_eligible = (
+                completeness["eligible"]
+                and sync["missing_reference_timestamps"] == 0
+                and sync["extra_timestamps_vs_reference"] == 0
+            )
+            if research_eligible:
+                eligible_count += 1
+            result_entry["research_eligibility"] = {
+                "eligible": research_eligible,
+                "completeness": {
+                    "missing_bars": completeness["missing_bars"],
+                    "misaligned_bars": completeness["misaligned_bars"],
+                    "outside_session_bars": completeness["outside_session_bars"],
+                    "observed_dates": completeness["observed_dates"],
+                    "expected_bars": completeness["expected_bars_on_observed_dates"],
+                    "observed_completed_bars": completeness["observed_completed_bars"],
+                },
+                "synchronization": sync,
+                "reference_symbol": chosen,
+            }
+        manifest["completeness_audit"] = {
+            "eligible": report["eligible"],
+            "eligible_symbols": eligible_count,
+            "audited_symbols": len(symbols),
+            "report_file": str(out_path),
+            "issues": report["issues"],
+        }
+        manifest_path.write_text(json.dumps(manifest, indent=2, default=str), encoding="utf-8")
+        report["manifest_updated"] = str(manifest_path)
     return report
