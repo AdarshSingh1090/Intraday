@@ -2,6 +2,7 @@ import unittest
 import pandas as pd
 
 from market_intelligence.strategy import generate_setup, StrategyConfig
+from market_intelligence.indicators import calculate_indicators
 
 
 def make_evaluation(direction="LONG", score_all=True):
@@ -43,6 +44,22 @@ def make_evaluation(direction="LONG", score_all=True):
 
 
 class StrategyTests(unittest.TestCase):
+    def test_calculated_indicators_include_strategy_required_ema_slope(self):
+        n = 80
+        close = [100 + i * 0.1 + (i % 4) * 0.02 for i in range(n)]
+        df = pd.DataFrame({
+            "timestamp": pd.date_range("2026-11-20 09:15", periods=n, freq="5min", tz="Asia/Kolkata"),
+            "open": [x - 0.02 for x in close],
+            "high": [x + 0.1 for x in close],
+            "low": [x - 0.1 for x in close],
+            "close": close,
+            "volume": [1000] * n,
+        })
+        indicators = calculate_indicators(df)
+        self.assertIn("ema_20_slope_percent", indicators.columns)
+        self.assertTrue(pd.notna(indicators.iloc[-1]["ema_20_slope_percent"]))
+        self.assertGreater(indicators.iloc[-1]["ema_20_slope_percent"], 0)
+
     def test_valid_long_candidate(self):
         result=generate_setup(make_evaluation("LONG"))
         self.assertEqual(result["signal"],"LONG")
