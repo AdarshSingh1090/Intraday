@@ -24,6 +24,7 @@ import json
 from market_intelligence.backtester import backtest, BacktestConfig
 from market_intelligence.experiment import run_chronological_experiment
 from market_intelligence.research_data import ResearchFetchConfig, fetch_multi_symbol_research_data
+from market_intelligence.completeness import audit_research_directory
 
 
 # =========================================================
@@ -269,6 +270,36 @@ def cmd_fetch_research_data(args):
     if not report["successful_symbols"]:
         raise SystemExit(2)
     if report["failed_or_rejected_symbols"]:
+        raise SystemExit(1)
+
+
+
+
+# =========================================================
+# STAGE 8.1: DATASET COMPLETENESS AUDIT
+# =========================================================
+
+def cmd_audit_research_data(args):
+    report = audit_research_directory(
+        args.directory,
+        interval_minutes=args.interval,
+        reference_symbol=args.reference,
+    )
+    print("\\nSTAGE 8.1 DATASET COMPLETENESS AUDIT")
+    print("=" * 60)
+    for symbol, details in report.get("symbols", {}).items():
+        audit = details["completeness"]
+        print(f"{symbol}: rows={details['rows']} dates={audit['observed_dates']} missing={audit['missing_bars']} eligible={audit['eligible']}")
+        for issue in audit.get("issues", []):
+            print(f"  - {issue}")
+    if report.get("synchronization"):
+        print(f"Reference: {report['reference_symbol']}")
+        for symbol, details in report["synchronization"].items():
+            print(f"  {symbol}: missing-reference={details['missing_reference_timestamps']} extra={details['extra_timestamps_vs_reference']}")
+    print(f"Report: {report['report_file']}")
+    print("Calendar limitation: no whole-session/holiday inference")
+    print("Research-only | No broker execution")
+    if not report.get("eligible"):
         raise SystemExit(1)
 
 
@@ -882,6 +913,12 @@ def build_parser():
     research_data.add_argument("--output-dir", default="data/research")
     research_data.add_argument("--market-timezone", default="Asia/Kolkata")
     research_data.set_defaults(func=cmd_fetch_research_data)
+
+    research_audit = sub.add_parser("audit-research-data")
+    research_audit.add_argument("--directory", required=True, help="Directory containing per-symbol OHLCV CSVs.")
+    research_audit.add_argument("--interval", type=int, default=5)
+    research_audit.add_argument("--reference", help="Reference filename stem (e.g. RELIANCE.NS_5m). Defaults to the dataset with most rows.")
+    research_audit.set_defaults(func=cmd_audit_research_data)
 
     # -----------------------------------------------------
     # CSV IMPORT
