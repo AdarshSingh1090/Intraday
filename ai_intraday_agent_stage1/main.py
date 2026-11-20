@@ -284,6 +284,9 @@ def cmd_audit_research_data(args):
         args.directory,
         interval_minutes=args.interval,
         reference_symbol=args.reference,
+        session_start=args.session_start,
+        session_end=args.session_end,
+        post_session_end=args.post_session_end,
     )
     print("\\nSTAGE 8.1 DATASET COMPLETENESS AUDIT")
     print("=" * 60)
@@ -918,6 +921,9 @@ def build_parser():
     research_audit.add_argument("--directory", required=True, help="Directory containing per-symbol OHLCV CSVs.")
     research_audit.add_argument("--interval", type=int, default=5)
     research_audit.add_argument("--reference", help="Reference filename stem (e.g. RELIANCE.NS_5m). Defaults to the dataset with most rows.")
+    research_audit.add_argument("--session-start", default="09:15")
+    research_audit.add_argument("--session-end", default="15:30", help="Exclusive continuous-session end.")
+    research_audit.add_argument("--post-session-end", default="16:00", help="End of window used to classify post-session observations.")
     research_audit.set_defaults(func=cmd_audit_research_data)
 
     # -----------------------------------------------------
