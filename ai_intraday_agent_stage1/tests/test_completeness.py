@@ -77,6 +77,28 @@ class CompletenessAuditTests(unittest.TestCase):
             self.assertEqual(report["synchronization"]["B"]["missing_reference_timestamps"], 0)
             self.assertEqual(report["synchronization"]["B"]["extra_timestamps_vs_reference"], 0)
 
+    def test_manifest_research_eligibility_reflects_completeness_and_sync(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            a = self.full_session()
+            b = a.drop(index=10).reset_index(drop=True)
+            a.to_csv(Path(tmp, "A.csv"), index=False)
+            b.to_csv(Path(tmp, "B.csv"), index=False)
+            manifest = {
+                "results": {
+                    "A": {"status": "SAVED", "audit": {"eligible": True}},
+                    "B": {"status": "SAVED", "audit": {"eligible": True}},
+                }
+            }
+            Path(tmp, "manifest.json").write_text(__import__("json").dumps(manifest), encoding="utf-8")
+            report = audit_research_directory(tmp, 5, "A", as_of="2026-01-05 16:00+05:30")
+            updated = __import__("json").loads(Path(tmp, "manifest.json").read_text(encoding="utf-8"))
+            self.assertFalse(updated["completeness_audit"]["eligible"])
+            self.assertEqual(updated["completeness_audit"]["audited_symbols"], 2)
+            self.assertTrue(updated["results"]["A"]["research_eligibility"]["eligible"])
+            self.assertFalse(updated["results"]["B"]["research_eligibility"]["eligible"])
+            self.assertEqual(updated["results"]["B"]["research_eligibility"]["completeness"]["missing_bars"], 1)
+            self.assertTrue(Path(report["manifest_updated"]).exists())
+
     def test_empty_directory_is_ineligible(self):
         with tempfile.TemporaryDirectory() as tmp:
             report = audit_research_directory(tmp, as_of="2026-01-05 16:00+05:30")
