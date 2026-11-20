@@ -53,5 +53,25 @@ class SignalDiagnosticsTests(unittest.TestCase):
         self.assertEqual(result["last_sampled_timestamp"], "2026-11-20 15:00:00+05:30")
 
 
+    def test_excludes_post_session_cas_rows(self):
+        n = 76
+        close = [100 + i * 0.1 + (i % 5) * 0.01 for i in range(n)]
+        df = pd.DataFrame({
+            "timestamp": pd.date_range("2026-11-20 09:15", periods=n, freq="5min", tz="Asia/Kolkata"),
+            "open": [p - 0.02 for p in close], "high": [p + 0.1 for p in close],
+            "low": [p - 0.1 for p in close], "close": close, "volume": [1000] * n,
+        })
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sample.csv"
+            df.to_csv(path, index=False)
+            result = diagnose_file(path, "TEST", warmup=60, as_of="2026-11-20 16:00+05:30", session_end="15:15")
+        self.assertEqual(result["rows"], 76)
+        self.assertEqual(result["completed_rows"], 76)
+        self.assertEqual(result["session_rows"], 72)
+        self.assertEqual(result["post_session_rows_excluded"], 4)
+        self.assertEqual(result["sampled_bars"], 12)
+        self.assertEqual(result["last_sampled_timestamp"], "2026-11-20 15:10:00+05:30")
+
+
 if __name__ == "__main__":
     unittest.main()
