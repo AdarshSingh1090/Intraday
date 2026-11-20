@@ -26,6 +26,9 @@ class SignalDiagnosticsTests(unittest.TestCase):
         self.assertTrue(result["status_counts"].get("NO_SETUP", 0) > 0)
         self.assertEqual(result["insufficient_data_reasons"], {})
         self.assertTrue(result["no_setup_reasons"])
+        self.assertTrue(result["strategy_filter_pass_counts"])
+        self.assertTrue(result["strategy_filter_fail_counts"])
+        self.assertTrue(result["strategy_filter_pass_rates"])
         self.assertEqual(result["execution"], "none")
 
 
