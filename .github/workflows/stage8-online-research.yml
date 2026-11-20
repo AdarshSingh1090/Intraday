@@ -2,13 +2,6 @@ name: Stage 8 Online Research Data Collection
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - stage8-multi-stock-research
-    paths:
-      - ".github/workflows/stage8-online-research.yml"
-      - "ai_intraday_agent_stage1/market_intelligence/**"
-      - "ai_intraday_agent_stage1/main.py"
 
 concurrency:
   group: stage8-online-research-${{ github.ref }}
