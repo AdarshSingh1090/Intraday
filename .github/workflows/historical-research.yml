@@ -56,6 +56,7 @@ jobs:
             --symbols RELIANCE.NS,TCS.NS,INFY.NS,HDFCBANK.NS,ICICIBANK.NS \
             --start "${{ steps.dates.outputs.start }}" \
             --end "${{ steps.dates.outputs.end }}" \
+            --session-end 15:15 \
             --output reports/yahoo_provider_probe.json
       - name: Compare Yahoo against independent Upstox source (optional token)
         env:
@@ -67,16 +68,18 @@ jobs:
             --start "${{ steps.dates.outputs.start }}" \
             --end "${{ steps.dates.outputs.end }}" \
             --yahoo-dir data/research \
+            --session-end 15:15 \
             --output reports/independent_provider_probe.json
       - name: Audit dataset completeness
         continue-on-error: true
         run: |
-          python main.py audit-research-data --directory data/research --interval 5
+          python main.py audit-research-data --directory data/research --interval 5 --session-end 15:15
       - name: Run strategy filter diagnostics
         run: |
           mkdir -p reports
           python main.py strategy-diagnostics \
             --directory data/research \
+            --session-end 15:15 \
             --report-json reports/strategy_diagnostics.json
       - name: Run chronological experiments and cost stress tests
         shell: bash
@@ -92,7 +95,7 @@ jobs:
           run_experiment() {
             local report="$1"
             shift
-            if python main.py research "$@" --report-json "$report"; then
+            if python main.py research "$@" --session-end 15:15 --report-json "$report"; then
               echo "Completed: $report"
             else
               rc=$?
