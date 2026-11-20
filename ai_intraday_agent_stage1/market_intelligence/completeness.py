@@ -12,6 +12,8 @@ from pathlib import Path
 import json
 import pandas as pd
 
+from .session_calendar import audit_whole_sessions
+
 OHLCV = ["timestamp", "open", "high", "low", "close", "volume"]
 TIMEZONE = "Asia/Kolkata"
 
@@ -149,6 +151,8 @@ def audit_research_directory(
     root = Path(directory)
     files = sorted(root.glob("*.csv"))
     as_of_ts = _as_of_timestamp(as_of)
+    manifest_path = root / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else None
     symbols = {}
     for path in files:
         frame = _load_csv(path)
@@ -160,11 +164,24 @@ def audit_research_directory(
                 session_end=session_end, post_session_end=post_session_end, as_of=as_of_ts,
             ),
             "timestamps": set(timestamps),
+            "observed_dates": set(timestamps.date),
         }
+
+    observed_dates_by_symbol = {s: entry["observed_dates"] for s, entry in symbols.items()}
+    requested_start = manifest.get("start_date") if manifest else None
+    requested_end = manifest.get("end_date") if manifest else None
+    whole_session_calendar = audit_whole_sessions(
+        observed_dates_by_symbol,
+        start_date=requested_start,
+        end_date_exclusive=requested_end,
+        as_of=as_of_ts,
+        session_end=session_end,
+    )
 
     if not symbols:
         report = {
             "eligible": False, "symbols": {}, "issues": ["no CSV datasets found"],
+            "whole_session_calendar_audit": whole_session_calendar,
             "as_of_timestamp": str(as_of_ts),
         }
     else:
@@ -223,17 +240,19 @@ def audit_research_directory(
                     f"(missing={sync['missing_reference_timestamps']}, "
                     f"extra={sync['extra_timestamps_vs_reference']})"
                 )
+        aggregate_issues.extend(whole_session_calendar.get("issues", []))
         report = {
             "eligible": not aggregate_issues,
-            "symbols": {s: {k: v for k, v in e.items() if k != "timestamps"}
+            "symbols": {s: {k: v for k, v in e.items() if k not in ("timestamps", "observed_dates")}
                         for s, e in symbols.items()},
+            "whole_session_calendar_audit": whole_session_calendar,
             "reference_symbol": chosen,
             "synchronization": synchronization,
             "issues": aggregate_issues,
             "as_of_timestamp": str(as_of_ts),
             "synchronization_scope": "completed bars only; unfinished current-session bars excluded",
             "session": {"start": session_start, "end_exclusive": session_end, "post_session_window_end": post_session_end},
-            "note": "Cross-symbol comparison is limited to completed continuous-session timestamps; post-session/auction observations are excluded. This is not an exchange calendar.",
+            "note": "Cross-symbol comparison is limited to completed continuous-session timestamps; post-session/auction observations are excluded. Whole-session gaps are checked against the versioned NSE regular-session calendar; unknown years block eligibility.",
         }
     out_path = root / "completeness_audit.json"
     out_path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
@@ -257,8 +276,11 @@ def audit_research_directory(
                 continue
             completeness = entry["completeness"]
             sync = synchronization[file_symbol]
+            calendar_entry = whole_session_calendar.get("per_symbol", {}).get(file_symbol, {})
+            calendar_eligible = calendar_entry.get("eligible", False)
             research_eligible = (
                 completeness["eligible"]
+                and calendar_eligible
                 and sync["missing_reference_timestamps"] == 0
                 and sync["extra_timestamps_vs_reference"] == 0
             )
@@ -277,6 +299,7 @@ def audit_research_directory(
                     "observed_completed_bars": completeness["observed_completed_bars"],
                 },
                 "synchronization": sync,
+                "whole_session_calendar": calendar_entry,
                 "reference_symbol": chosen,
             }
         manifest["completeness_audit"] = {
@@ -285,6 +308,7 @@ def audit_research_directory(
             "audited_symbols": len(symbols),
             "report_file": str(out_path),
             "issues": report["issues"],
+            "whole_session_calendar_audit": whole_session_calendar,
         }
         manifest_path.write_text(json.dumps(manifest, indent=2, default=str), encoding="utf-8")
         report["manifest_updated"] = str(manifest_path)
