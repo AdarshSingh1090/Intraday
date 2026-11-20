@@ -143,13 +143,13 @@ def run_diagnostics(output, session=None, dataset=DATASET_ID):
     report["diagnostics"]["filter_symbol"] = _capture(
         session, "filter-symbol", f"{BASE}/filter",
         {"dataset": dataset, "config": config, "split": split,
-         "where": '"symbol"=\\'RELIANCE\\'', "offset": 0, "length": 5},
+         "where": "\"symbol\"='RELIANCE'", "offset": 0, "length": 5},
     )
     # Bounded target-window query tests the composite predicate used by recovery.
     report["diagnostics"]["filter_target_window"] = _capture(
         session, "filter-target-window", f"{BASE}/filter",
         {"dataset": dataset, "config": "minute", "split": "train",
-         "where": '"symbol"=\\'RELIANCE\\' AND "timestamp">=\\'2026-10-15T06:10:00Z\\' AND "timestamp"<\\'2026-10-15T06:30:00Z\\'",
+         "where": "\"symbol\"='RELIANCE' AND \"timestamp\">='2026-10-15T06:10:00Z' AND \"timestamp\"<'2026-10-15T06:30:00Z'",
          "offset": 0, "length": 100},
     )
 
