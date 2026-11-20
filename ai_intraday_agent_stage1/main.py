@@ -25,6 +25,7 @@ from market_intelligence.backtester import backtest, BacktestConfig
 from market_intelligence.experiment import run_chronological_experiment
 from market_intelligence.research_data import ResearchFetchConfig, fetch_multi_symbol_research_data
 from market_intelligence.completeness import audit_research_directory
+from market_intelligence.strategy_diagnostics import diagnose_directory
 
 
 # =========================================================
@@ -301,6 +302,30 @@ def cmd_audit_research_data(args):
     print("Research-only | No broker execution")
     if not report.get("eligible"):
         raise SystemExit(1)
+
+
+def cmd_strategy_diagnostics(args):
+    report = diagnose_directory(args.directory)
+    print("\\nSTAGE 8.2 STRATEGY FILTER DIAGNOSTICS")
+    print("=" * 72)
+    aggregate = report["aggregate"]
+    print(f"Directional observations: {aggregate['directional_observations']}")
+    print("Aggregate filter pass rates (bottleneck first):")
+    for name in aggregate["bottleneck_filters_lowest_pass_rate_first"]:
+        item = aggregate["filter_summary"][name]
+        rate = item["pass_rate_pct"]
+        print(f"  {name}: {item['passed']}/{item['tested']} ({rate if rate is not None else 'n/a'}%)")
+    print("\\nScenario pass counts by symbol:")
+    for symbol, details in report["symbols"].items():
+        print(f"  {symbol}: directional={details['directional_observations']}")
+        for scenario, item in details["scenarios"].items():
+            print(f"    {scenario}: {item['passing_observations']}")
+    print("No configuration selected. Diagnostics only; paper-only; no broker execution.")
+    if args.report_json:
+        out = Path(args.report_json)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(report, indent=2, default=str, allow_nan=False), encoding="utf-8")
+        print(f"Report JSON saved: {out}")
 
 
 # =========================================================
@@ -919,6 +944,15 @@ def build_parser():
     research_audit.add_argument("--interval", type=int, default=5)
     research_audit.add_argument("--reference", help="Reference filename stem (e.g. RELIANCE.NS_5m). Defaults to the dataset with most rows.")
     research_audit.set_defaults(func=cmd_audit_research_data)
+
+    # -----------------------------------------------------
+    # STAGE 8.2: STRATEGY FILTER DIAGNOSTICS
+    # -----------------------------------------------------
+
+    diagnostics = sub.add_parser("strategy-diagnostics")
+    diagnostics.add_argument("--directory", required=True, help="Directory containing per-symbol historical OHLCV CSVs.")
+    diagnostics.add_argument("--report-json", help="Optional output path for the diagnostic report.")
+    diagnostics.set_defaults(func=cmd_strategy_diagnostics)
 
     # -----------------------------------------------------
     # CSV IMPORT
