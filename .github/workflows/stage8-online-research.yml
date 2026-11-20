@@ -48,35 +48,77 @@ jobs:
         continue-on-error: true
         run: |
           python main.py audit-research-data --directory data/research --interval 5 --session-end 15:15
-      - name: Run chronological experiments and cost stress tests
+      - name: Enforce acquisition and completeness gate
+        id: research_gate
         working-directory: ai_intraday_agent_stage1
-        continue-on-error: true
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from market_intelligence.research_gate import evaluate_research_gate
+
+          audit_path = Path("data/research/completeness_audit.json")
+          manifest_path = Path("data/research/manifest.json")
+          audit = json.loads(audit_path.read_text(encoding="utf-8")) if audit_path.exists() else None
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else None
+          gate = evaluate_research_gate(audit, manifest)
+          Path("reports").mkdir(exist_ok=True)
+          Path("reports/research_gate.json").write_text(json.dumps(gate, indent=2), encoding="utf-8")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"eligible={str(gate['eligible']).lower()}\\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("## Research eligibility\\n\\n")
+              summary.write(f"**Status:** {gate['status']}\\n\\n")
+              if gate["eligible"]:
+                  summary.write("Acquisition, OHLCV validation, completeness, and synchronization passed. Experiments may run.\\n")
+              else:
+                  summary.write("Chronological experiments and cost stress tests are blocked. No candles are repaired or filled.\\n\\n")
+                  for issue in gate["issues"]:
+                      summary.write(f"- {issue}\\n")
+          print(f"Research eligibility: {gate['status']}")
+          PY
+      - name: Run chronological experiments and cost stress tests
+        if: steps.research_gate.outputs.eligible == 'true'
+        working-directory: ai_intraday_agent_stage1
         run: |
           mkdir -p data/research/reports
+          failures=0
           for file in data/research/*_5m.csv; do
             [ -f "$file" ] || continue
-            symbol="$(basename "$file" _5m.csv)"
+            symbol="$(basename "$file" "_5m.csv")"
             for scenario in 5 10 20; do
-              python main.py research \
-                --file "$file" \
-                --symbol "$symbol" \
-                --interval 5 \
-                --warmup-bars 60 \
-                --budget 8900 \
-                --train-fraction 0.60 \
-                --validation-fraction 0.20 \
-                --max-trades-per-day 3 \
-                --daily-loss-limit-pct 2.0 \
-                --risk-per-trade-pct 0.5 \
-                --max-capital-per-trade-pct 35.0 \
-                --max-portfolio-exposure-pct 70.0 \
-                --slippage-bps "$scenario" \
-                --fee-rate 0.0003 \
-                --flat-fee 0 \
-                --session-end 15:15 \
-                --report-json "data/research/reports/${symbol}_slippage_${scenario}bps.json"
+              report="data/research/reports/$(symbol)_slippage_$(scenario)bps.json"
+              if python main.py research \\
+                --file "$file" \\
+                --symbol "$symbol" \\
+                --interval 5 \\
+                --warmup-bars 60 \\
+                --budget 8900 \\
+                --train-fraction 0.60 \\
+                --validation-fraction 0.20 \\
+                --max-trades-per-day 3 \\
+                --daily-loss-limit-pct 2.0 \\
+                --risk-per-trade-pct 0.5 \\
+                --max-capital-per-trade-pct 35.0 \\
+                --max-portfolio-exposure-pct 70.0 \\
+                --slippage-bps "$scenario" \\
+                --fee-rate 0.0003 \\
+                --flat-fee 0 \\
+                --session-end 15:15 \\
+                --report-json "$report"; then
+                echo "Completed: $report"
+              else
+                rc=$?
+                echo "::error::Experiment failed (exit $rc): $report"
+                failures=$((failures + 1))
+              fi
             done
           done
+          if [ "$failures" -gt 0 ]; then
+            echo "::error::$failures experiment report(s) failed."
+            exit 1
+          fi
       - name: Upload research datasets and audit reports
         if: always()
         uses: actions/upload-artifact@v4
