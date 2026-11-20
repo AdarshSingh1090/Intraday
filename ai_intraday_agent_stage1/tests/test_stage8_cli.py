@@ -4,6 +4,19 @@ from main import build_parser
 
 
 class Stage8CliTests(unittest.TestCase):
+    def test_audit_research_data_parser(self):
+        args = build_parser().parse_args([
+            "audit-research-data",
+            "--directory", "data/research",
+            "--interval", "5",
+            "--reference", "RELIANCE.NS_5m",
+        ])
+        self.assertEqual(args.cmd, "audit-research-data")
+        self.assertEqual(args.directory, "data/research")
+        self.assertEqual(args.interval, 5)
+        self.assertEqual(args.reference, "RELIANCE.NS_5m")
+        self.assertEqual(args.func.__name__, "cmd_audit_research_data")
+
     def test_fetch_research_data_parser(self):
         args = build_parser().parse_args([
             "fetch-research-data",
