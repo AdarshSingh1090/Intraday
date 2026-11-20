@@ -52,10 +52,10 @@ jobs:
       - name: Compare Yahoo retrieval paths for recurring missing timestamps
         run: |
           mkdir -p reports
-          python market_intelligence/provider_probe.py \\
-            --symbols RELIANCE.NS,TCS.NS,INFY.NS,HDFCBANK.NS,ICICIBANK.NS \\
-            --start "${{ steps.dates.outputs.start }}" \\
-            --end "${{ steps.dates.outputs.end }}" \\
+          python market_intelligence/provider_probe.py \
+            --symbols RELIANCE.NS,TCS.NS,INFY.NS,HDFCBANK.NS,ICICIBANK.NS \
+            --start "${{ steps.dates.outputs.start }}" \
+            --end "${{ steps.dates.outputs.end }}" \
             --output reports/yahoo_provider_probe.json
       - name: Audit dataset completeness
         continue-on-error: true
