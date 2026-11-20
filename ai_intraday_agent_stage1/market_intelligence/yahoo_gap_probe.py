@@ -350,10 +350,37 @@ def probe_openchart_missing_bars(directory, symbols, output, session_start="09:1
                         "candidates": {str(t): None for t in missing},
                     }
                 time_module.sleep(0.25)
+            missing_count = sum(len(v) for v in missing_by_day.values())
+            candidates_found = sum(
+                v is not None
+                for day in day_reports.values()
+                for v in day.get("candidates", {}).values()
+            )
+            day_statuses = [day.get("status") for day in day_reports.values()]
+            successful_days = day_statuses.count("OK")
+            empty_days = day_statuses.count("EMPTY")
+            error_days = day_statuses.count("ERROR")
+            if not missing_by_day:
+                probe_status = "NO_GAPS"
+            elif candidates_found:
+                probe_status = "CANDIDATES_FOUND"
+            elif successful_days:
+                probe_status = "PROBED_NO_CANDIDATES"
+            elif empty_days == len(day_statuses) and day_statuses:
+                probe_status = "PROVIDER_EMPTY_FOR_GAPS"
+            elif error_days:
+                probe_status = "PROBE_ERRORS"
+            else:
+                probe_status = "INCONCLUSIVE"
             reports[symbol] = {
-                "status": "GAPS_PROBED" if missing_by_day else "NO_GAPS",
-                "missing_count_original": sum(len(v) for v in missing_by_day.values()),
-                "missing_candles_found": sum(v is not None for day in day_reports.values() for v in day.get("candidates", {}).values()),
+                "status": probe_status,
+                "missing_count_original": missing_count,
+                "missing_candles_found": candidates_found,
+                "gap_probe_day_status_counts": {
+                    "OK": successful_days,
+                    "EMPTY": empty_days,
+                    "ERROR": error_days,
+                },
                 "missing_by_day": day_reports,
             }
         except Exception as exc:
@@ -381,13 +408,41 @@ def probe_openchart_missing_bars(directory, symbols, output, session_start="09:1
     except Exception as exc:
         connectivity_sanity = {"status": "ERROR", "error": f"{type(exc).__name__}: {exc}"}
 
+    total_missing = sum(report.get("missing_count_original", 0) for report in reports.values())
+    total_candidates = sum(report.get("missing_candles_found", 0) for report in reports.values())
+    if total_missing == 0:
+        overall_status = "NO_GAPS"
+    elif connectivity_sanity.get("status") == "OK":
+        overall_status = "PROBE_COMPLETED"
+    elif total_candidates:
+        overall_status = "PARTIAL_PROVIDER_HEALTH"
+    else:
+        overall_status = "INCONCLUSIVE_PROVIDER_HEALTH"
+
+    if connectivity_sanity.get("status") != "OK":
+        for report in reports.values():
+            if report.get("missing_count_original", 0) and report.get("missing_candles_found", 0) == 0:
+                report["status_before_sanity_check"] = report.get("status")
+                report["status"] = "INCONCLUSIVE_PROVIDER_HEALTH"
+
     result = {
         "purpose": "free-source comparison of Yahoo gaps against NSE Chart API via OpenChart",
         "provider": "NSE Chart API via OpenChart (unofficial wrapper)",
         "independent_provider_comparison": True,
+        "status": overall_status,
         "data_repaired": False,
         "datasets_modified": False,
-        "interpretation": "NSE-source candidate candles are reported only; no CSVs are modified. Timestamp interpretation is selected by overlap with original Yahoo timestamps and reported.",
+        "interpretation": (
+            "NSE-source candidate candles are reported only; no CSVs are modified. "
+            "Timestamp interpretation is selected by overlap with original Yahoo timestamps and reported. "
+            "If connectivity sanity is not OK, zero candidates are inconclusive and must not be interpreted as confirmed gaps."
+        ),
+        "summary": {
+            "symbols_with_gaps": sum(report.get("missing_count_original", 0) > 0 for report in reports.values()),
+            "missing_timestamps_probed": total_missing,
+            "candidate_candles_found": total_candidates,
+            "connectivity_sanity_status": connectivity_sanity.get("status"),
+        },
         "session": {"start": session_start, "end_exclusive": session_end},
         "connectivity_sanity": connectivity_sanity,
         "reports": reports,

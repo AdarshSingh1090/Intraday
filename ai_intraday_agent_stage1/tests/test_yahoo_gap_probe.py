@@ -84,10 +84,40 @@ class YahooGapProbeTests(unittest.TestCase):
             report=probe_openchart_missing_bars(temp,["RELIANCE.NS"],Path(temp)/"openchart.json",client=fake_client)
             item=report["reports"]["RELIANCE.NS"]
             self.assertEqual(item["missing_candles_found"],1)
+            self.assertEqual(item["status"], "CANDIDATES_FOUND")
             self.assertEqual(item["missing_by_day"]["2026-10-15"]["candidates"][str(missing)]["close"],100.5)
             self.assertEqual(report["connectivity_sanity"]["status"], "OK")
+            self.assertEqual(report["status"], "PROBE_COMPLETED")
             self.assertFalse(report["datasets_modified"])
             self.assertEqual(len(pd.read_csv(path)),len(original))
+
+
+    def test_openchart_empty_provider_response_is_inconclusive(self):
+        day = pd.Timestamp("2026-10-15").date()
+        grid = expected_grid(day)
+        missing = grid[30]
+        original = pd.DataFrame({
+            "timestamp": grid.delete(30).astype(str), "open": 100, "high": 101,
+            "low": 99, "close": 100.5, "volume": 2000
+        })
+        fake_client = SimpleNamespace(historical=lambda **kwargs: pd.DataFrame())
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "RELIANCE.NS_5m.csv"
+            original.to_csv(path, index=False)
+            out = Path(temp) / "openchart.json"
+            with patch("time.sleep", return_value=None):
+                report = probe_openchart_missing_bars(
+                    temp, ["RELIANCE.NS"], out, client=fake_client
+                )
+            item = report["reports"]["RELIANCE.NS"]
+            self.assertEqual(report["connectivity_sanity"]["status"], "EMPTY")
+            self.assertEqual(report["status"], "INCONCLUSIVE_PROVIDER_HEALTH")
+            self.assertEqual(item["status"], "INCONCLUSIVE_PROVIDER_HEALTH")
+            self.assertEqual(item["status_before_sanity_check"], "PROVIDER_EMPTY_FOR_GAPS")
+            self.assertEqual(item["missing_candles_found"], 0)
+            self.assertEqual(item["missing_by_day"]["2026-10-15"]["status"], "EMPTY")
+            self.assertFalse(report["datasets_modified"])
+            self.assertEqual(len(pd.read_csv(path)), len(original))
 
 
 if __name__ == "__main__":
