@@ -2,7 +2,8 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import pandas as pd
 
@@ -51,11 +52,14 @@ class YahooGapProbeTests(unittest.TestCase):
             source = Path(temp) / "RELIANCE.NS_5m.csv"
             original.to_csv(source, index=False)
             out = Path(temp) / "report.json"
-            report = probe_missing_yahoo_bars(temp, ["RELIANCE.NS"], out, session=session)
+            fake_yf = SimpleNamespace(Ticker=lambda symbol: SimpleNamespace(history=lambda **kwargs: pd.DataFrame()))
+            with patch.dict("sys.modules", {"yfinance": fake_yf}):
+                report = probe_missing_yahoo_bars(temp, ["RELIANCE.NS"], out, session=session)
             item = report["reports"]["RELIANCE.NS"]
             self.assertEqual(item["missing_count_original"], 1)
             self.assertEqual(item["missing_candles_found_by_endpoint"]["query1.finance.yahoo.com"], 1)
             self.assertEqual(item["missing_candles_found_by_endpoint"]["query2.finance.yahoo.com"], 1)
+            self.assertEqual(item["missing_candles_found_by_yfinance_repair_true"], 0)
             self.assertFalse(report["datasets_modified"])
             self.assertEqual(len(pd.read_csv(source)), len(original))
             self.assertTrue(out.exists())

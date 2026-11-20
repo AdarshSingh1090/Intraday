@@ -138,10 +138,56 @@ def probe_missing_yahoo_bars(directory, symbols, output, session_start="09:15", 
                                 "both_found": ca is not None and cb is not None,
                                 "values_agree": ca == cb if ca is not None and cb is not None else None,
                             }
+                repair_report = {"status": "NOT_RUN", "rows_returned": 0, "requested_missing_timestamps": {}}
+                try:
+                    import yfinance as yf
+                    repaired = yf.Ticker(symbol).history(
+                        start=day_text,
+                        end=(day + timedelta(days=1)).isoformat(),
+                        interval="5m",
+                        auto_adjust=False,
+                        prepost=False,
+                        repair=True,
+                    )
+                    if repaired is None or repaired.empty:
+                        repair_report = {"status": "EMPTY", "rows_returned": 0,
+                                         "requested_missing_timestamps": {str(t): None for t in missing}}
+                    else:
+                        repaired = repaired.copy()
+                        if isinstance(repaired.columns, pd.MultiIndex):
+                            repaired.columns = repaired.columns.get_level_values(0)
+                        if "timestamp" not in repaired.columns:
+                            repaired = repaired.reset_index()
+                        aliases = {str(c).lower(): c for c in repaired.columns}
+                        time_col = next((aliases[k] for k in ("timestamp", "datetime", "date") if k in aliases), None)
+                        if time_col is None:
+                            raise ValueError("repair=True response has no timestamp column")
+                        repaired["timestamp"] = pd.to_datetime(repaired[time_col], errors="coerce")
+                        if repaired["timestamp"].dt.tz is None:
+                            repaired["timestamp"] = repaired["timestamp"].dt.tz_localize(TIMEZONE)
+                        else:
+                            repaired["timestamp"] = repaired["timestamp"].dt.tz_convert(TIMEZONE)
+                        repaired = repaired.dropna(subset=["timestamp"]).set_index("timestamp")
+                        candidates = {}
+                        for stamp in missing:
+                            if stamp in repaired.index:
+                                row = repaired.loc[stamp]
+                                if isinstance(row, pd.DataFrame):
+                                    row = row.iloc[0]
+                                candidates[str(stamp)] = {k: float(row[aliases[k]]) for k in OHLCV[1:]}
+                            else:
+                                candidates[str(stamp)] = None
+                        repair_report = {"status": "OK", "rows_returned": int(len(repaired)),
+                                         "requested_missing_timestamps": candidates}
+                except Exception as exc:
+                    repair_report = {"status": "ERROR", "error": f"{type(exc).__name__}: {exc}",
+                                     "requested_missing_timestamps": {str(t): None for t in missing}}
+
                 day_reports[day_text] = {
                     "missing_timestamps_in_original": [str(x) for x in missing],
                     "endpoints": endpoint_reports,
                     "endpoint_comparison": comparison,
+                    "yfinance_repair_true": repair_report,
                 }
 
             found_by_endpoint = {}
@@ -151,11 +197,17 @@ def probe_missing_yahoo_bars(directory, symbols, output, session_start="09:15", 
                     for day_report in day_reports.values()
                     for value in day_report.get("endpoints", {}).get(host, {}).get("requested_missing_timestamps", {}).values()
                 )
+            found_by_repair = sum(
+                value is not None
+                for day_report in day_reports.values()
+                for value in day_report.get("yfinance_repair_true", {}).get("requested_missing_timestamps", {}).values()
+            )
             reports[symbol] = {
                 "status": "GAPS_PROBED" if missing_by_day else "NO_GAPS",
                 "missing_count_original": sum(len(v) for v in missing_by_day.values()),
                 "missing_by_day": day_reports,
                 "missing_candles_found_by_endpoint": found_by_endpoint,
+                "missing_candles_found_by_yfinance_repair_true": found_by_repair,
             }
         except Exception as exc:
             reports[symbol] = {"status": "ERROR", "error": f"{type(exc).__name__}: {exc}"}
