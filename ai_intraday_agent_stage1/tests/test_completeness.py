@@ -63,6 +63,8 @@ class CompletenessAuditTests(unittest.TestCase):
             report = audit_research_directory(tmp, 5, "A", as_of="2026-01-05 16:00+05:30")
             self.assertFalse(report["eligible"])
             self.assertEqual(report["synchronization"]["B"]["missing_reference_timestamps"], 1)
+            self.assertTrue(any("B: completeness audit failed" in issue for issue in report["issues"]))
+            self.assertTrue(any("B: timestamp synchronization mismatch" in issue for issue in report["issues"]))
             self.assertTrue(Path(tmp, "completeness_audit.json").exists())
 
     def test_sync_ignores_unfinished_bar_for_current_partial_session(self):
