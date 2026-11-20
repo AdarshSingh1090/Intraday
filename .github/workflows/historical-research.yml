@@ -1,6 +1,13 @@
 name: Historical Research Data & First Experiments
 
 on:
+  push:
+    branches:
+      - stage8-multi-stock-research
+    paths:
+      - "ai_intraday_agent_stage1/market_intelligence/**"
+      - "ai_intraday_agent_stage1/main.py"
+      - ".github/workflows/historical-research.yml"
   workflow_dispatch:
 
 concurrency:
@@ -62,13 +69,29 @@ jobs:
             echo "No datasets downloaded; preserving manifest and audit outputs."
             exit 0
           fi
+          failures=0
+          run_experiment() {
+            local report="$1"
+            shift
+            if python main.py research "$@" --report-json "$report"; then
+              echo "Completed: $report"
+            else
+              rc=$?
+              echo "::error::Experiment failed (exit $rc): $report"
+              failures=$((failures + 1))
+            fi
+          }
           for file in "${files[@]}"; do
             symbol=$(basename "$file" "_5m.csv")
             echo "=== Experiment: $symbol ==="
-            python main.py research --file "$file" --symbol "$symbol" --interval 5 --budget 8900 --report-json "reports/${symbol}_base.json" || true
-            python main.py research --file "$file" --symbol "$symbol" --interval 5 --budget 8900 --slippage-bps 10 --fee-rate 0.0006 --report-json "reports/${symbol}_stress_2x.json" || true
-            python main.py research --file "$file" --symbol "$symbol" --interval 5 --budget 8900 --slippage-bps 20 --fee-rate 0.0009 --report-json "reports/${symbol}_stress_4x.json" || true
+            run_experiment "reports/${symbol}_base.json" --file "$file" --symbol "$symbol" --interval 5 --budget 8900
+            run_experiment "reports/${symbol}_stress_2x.json" --file "$file" --symbol "$symbol" --interval 5 --budget 8900 --slippage-bps 10 --fee-rate 0.0006
+            run_experiment "reports/${symbol}_stress_4x.json" --file "$file" --symbol "$symbol" --interval 5 --budget 8900 --slippage-bps 20 --fee-rate 0.0009
           done
+          if [ "$failures" -gt 0 ]; then
+            echo "::error::$failures experiment report(s) failed; see logs and uploaded artifact."
+            exit 1
+          fi
       - name: Upload research bundle
         if: always()
         uses: actions/upload-artifact@v4
