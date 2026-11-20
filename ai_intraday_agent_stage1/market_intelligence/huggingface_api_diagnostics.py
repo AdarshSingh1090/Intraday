@@ -57,10 +57,10 @@ def _capture(session, name, url, params=None, timeout=TIMEOUT):
 
 def _config_split_from_splits(payload):
     if not isinstance(payload, dict):
-        return "default", "minute"
+        return "default", "train"
     entries = payload.get("splits")
     if not isinstance(entries, list):
-        return "default", "minute"
+        return "default", "train"
     # HF reports this dataset as two configs (day/minute), each with split=train.
     for entry in entries:
         if isinstance(entry, dict) and entry.get("config") == "minute":
