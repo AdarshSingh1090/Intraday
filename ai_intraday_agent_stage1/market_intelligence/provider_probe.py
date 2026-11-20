@@ -108,8 +108,16 @@ def run_probe(symbols, start, end, output):
         except Exception as exc:
             reports[symbol] = {"error": f"{type(exc).__name__}: {exc}"}
     result = {
-        "purpose": "compare Yahoo retrieval paths; no data repair or strategy tuning",
+        "purpose": "compare yfinance interfaces; no data repair or strategy tuning",
         "provider": "Yahoo Finance via yfinance",
+        "yfinance_version": getattr(yf, "__version__", "unknown"),
+        "comparison_scope": "same yfinance package and Yahoo Finance source; yf.download is an interface wrapper, not an independent provider",
+        "independent_provider_comparison": False,
+        "interpretation_warning": (
+            "Identical results between Ticker.history and yf.download do not validate "
+            "Yahoo's source data completeness. An independent market-data provider is "
+            "required to investigate source-side gaps."
+        ),
         "start": start,
         "end_exclusive": end,
         "interval_minutes": 5,
