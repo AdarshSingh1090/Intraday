@@ -9,6 +9,10 @@ on:
       - ".github/workflows/stage9-signal-diagnostics.yml"
       - "ai_intraday_agent_stage1/market_intelligence/**"
 
+concurrency:
+  group: stage9-signal-diagnostics-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
