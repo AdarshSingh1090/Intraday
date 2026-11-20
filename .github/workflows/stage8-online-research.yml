@@ -88,7 +88,7 @@ jobs:
             [ -f "$file" ] || continue
             symbol="$(basename "$file" "_5m.csv")"
             for scenario in 5 10 20; do
-              report="data/research/reports/$symbol"_slippage_"$scenario"bps.json"
+              report="data/research/reports/$symbol"_slippage_"$scenario"bps.json
               if python main.py research \
                 --file "$file" \
                 --symbol "$symbol" \
