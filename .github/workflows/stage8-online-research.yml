@@ -10,6 +10,10 @@ on:
       - "ai_intraday_agent_stage1/market_intelligence/**"
       - "ai_intraday_agent_stage1/main.py"
 
+concurrency:
+  group: stage8-online-research-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
