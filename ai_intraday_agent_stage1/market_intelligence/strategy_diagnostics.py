@@ -10,6 +10,36 @@ from market_intelligence.screener import calculate_screening_metrics
 from market_intelligence.strategy import StrategyConfig
 
 FILTERS = ["trend_strength", "ema_alignment", "rsi", "momentum", "relative_volume", "ema_extension", "candle_confirmation"]
+TIMEZONE = "Asia/Kolkata"
+
+def _market_time(values):
+    timestamps = pd.to_datetime(values, errors="coerce")
+    if timestamps.dt.tz is None:
+        return timestamps.dt.tz_localize(TIMEZONE, ambiguous="NaT", nonexistent="NaT")
+    return timestamps.dt.tz_convert(TIMEZONE)
+
+
+def _session_filter(frame, session_start="09:15", session_end="15:30", post_session_end="16:00"):
+    start = pd.to_datetime(session_start).time()
+    end = pd.to_datetime(session_end).time()
+    post_end = pd.to_datetime(post_session_end).time()
+    if not (start < end <= post_end):
+        raise ValueError("session_start must be before session_end, and session_end must not exceed post_session_end")
+    raw = frame.copy()
+    raw["timestamp"] = _market_time(raw["timestamp"])
+    if raw["timestamp"].isna().any():
+        raise ValueError("invalid timestamps")
+    in_session = (raw["timestamp"].dt.time >= start) & (raw["timestamp"].dt.time < end)
+    post_session = (raw["timestamp"].dt.time >= end) & (raw["timestamp"].dt.time < post_end)
+    outside = (raw["timestamp"].dt.time < start) | (raw["timestamp"].dt.time >= post_end)
+    return raw.loc[in_session].sort_values("timestamp").reset_index(drop=True), {
+        "rows": len(frame), "continuous_session_rows": int(in_session.sum()),
+        "post_session_rows_excluded": int(post_session.sum()),
+        "outside_market_window_rows_excluded": int(outside.sum()),
+        "session_start": session_start, "session_end": session_end,
+        "post_session_window_end": post_session_end,
+    }
+
 REQUIRED_INDICATORS = ["ema_20", "ema_50", "rsi_14", "atr_14", "ema_20_slope_percent"]
 
 
@@ -69,7 +99,7 @@ def _scenario_masks():
     return masks
 
 
-def diagnose_symbol(frame, symbol, config=None):
+def diagnose_symbol(frame, symbol, config=None, session_start="09:15", session_end="15:30", post_session_end="16:00"):
     """Count directional observations and filter pass/fail; scenarios are descriptive only."""
     config = config or StrategyConfig()
     if frame is None or frame.empty:
@@ -78,11 +108,9 @@ def diagnose_symbol(frame, symbol, config=None):
     missing = sorted(required - set(frame.columns))
     if missing:
         raise ValueError(f"{symbol}: missing columns {missing}")
-    data = frame.copy()
-    data["timestamp"] = pd.to_datetime(data["timestamp"], errors="coerce")
-    if data["timestamp"].isna().any():
-        raise ValueError(f"{symbol}: invalid timestamps")
-    data = data.sort_values("timestamp").reset_index(drop=True)
+    data, session_meta = _session_filter(frame, session_start, session_end, post_session_end)
+    if data.empty:
+        raise ValueError(f"{symbol}: no candles remain in configured continuous session")
     indicators = calculate_indicators(data)
     missing_indicators = sorted(set(REQUIRED_INDICATORS) - set(indicators.columns))
     if missing_indicators:
@@ -115,7 +143,7 @@ def diagnose_symbol(frame, symbol, config=None):
         summary = {name: {"tested": 0, "passed": 0, "failed": 0, "pass_rate_pct": None} for name in FILTERS}
         scenarios = {name: {"required_filters": list(req), "passing_observations": 0, "pass_rate_pct": None} for name, req in _scenario_masks().items()}
         scenarios["strategy_baseline_hard_filters_plus_minimum_score"] = {"required_filters": ["trend_strength", "ema_alignment", "rsi", "relative_volume", f"score>={config.minimum_score}"], "passing_observations": 0, "pass_rate_pct": None}
-        return {"symbol": symbol, "rows": len(data), "valid_indicator_rows": valid_indicator_rows, "directional_observations": 0, "filter_summary": summary, "scenarios": scenarios, "diagnostic_rows": []}
+        return {"symbol": symbol, **session_meta, "valid_indicator_rows": valid_indicator_rows, "directional_observations": 0, "filter_summary": summary, "scenarios": scenarios, "diagnostic_rows": []}
 
     total = len(observations)
     summary = {}
@@ -135,7 +163,7 @@ def diagnose_symbol(frame, symbol, config=None):
     bottlenecks = sorted(FILTERS, key=lambda f: (summary[f]["pass_rate_pct"], f))
     direction_counts = observations["direction"].value_counts().to_dict()
     return {
-        "symbol": symbol, "rows": len(data), "valid_indicator_rows": valid_indicator_rows,
+        "symbol": symbol, **session_meta, "valid_indicator_rows": valid_indicator_rows,
         "directional_observations": total, "direction_counts": direction_counts,
         "filter_summary": summary, "bottleneck_filters_lowest_pass_rate_first": bottlenecks,
         "scenarios": scenarios, "diagnostic_rows": observations.to_dict(orient="records"),
@@ -143,7 +171,7 @@ def diagnose_symbol(frame, symbol, config=None):
     }
 
 
-def diagnose_directory(directory, config=None):
+def diagnose_directory(directory, config=None, session_start="09:15", session_end="15:30", post_session_end="16:00"):
     """Diagnose all symbol CSVs in a directory and aggregate filter counts."""
     path = Path(directory)
     files = sorted(path.glob("*.csv"))
@@ -152,7 +180,7 @@ def diagnose_directory(directory, config=None):
     results = {}
     for file in files:
         symbol = file.stem.rsplit("_", 1)[0]
-        results[symbol] = diagnose_symbol(pd.read_csv(file), symbol, config)
+        results[symbol] = diagnose_symbol(pd.read_csv(file), symbol, config, session_start, session_end, post_session_end)
     aggregate = {}
     for name in FILTERS:
         tested = sum(r["filter_summary"][name]["tested"] for r in results.values())
@@ -160,7 +188,7 @@ def diagnose_directory(directory, config=None):
         aggregate[name] = {"tested": tested, "passed": passed, "failed": tested-passed, "pass_rate_pct": round(100*passed/tested, 2) if tested else None}
     ordered = sorted(FILTERS, key=lambda f: (aggregate[f]["pass_rate_pct"] if aggregate[f]["pass_rate_pct"] is not None else 101, f))
     return {
-        "report_type": "strategy_filter_diagnostic", "symbols": results,
+        "report_type": "strategy_filter_diagnostic", "session": {"start": session_start, "end_exclusive": session_end, "post_session_window_end": post_session_end}, "symbols": results,
         "aggregate": {"directional_observations": sum(r["directional_observations"] for r in results.values()), "filter_summary": aggregate, "bottleneck_filters_lowest_pass_rate_first": ordered},
         "paper_only": True, "execution": "none",
         "warning": "This report does not estimate returns, select a strategy, or recommend relaxing any rule.",
