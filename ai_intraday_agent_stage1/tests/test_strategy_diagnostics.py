@@ -14,7 +14,7 @@ def make_frame(n=140, mode="up"):
     else:
         close = [100+((i%4)-1.5)*0.03 for i in range(n)]
     open_ = [c-0.02 if mode != "down" else c+0.02 for c in close]
-    return pd.DataFrame({"timestamp":timestamps, "open":open_, "high":[max(o,c)+0.05 for o,c in zip(open_,close)], "low":[min(o,c)-0.05 for o,c in zip(open_,close)], "close":close, "volume":[1000+i for i in range(n)})
+    return pd.DataFrame({"timestamp":timestamps, "open":open_, "high":[max(o,c)+0.05 for o,c in zip(open_,close)], "low":[min(o,c)-0.05 for o,c in zip(open_,close)], "close":close, "volume":[1000+i for i in range(n)]})
 
 
 class StrategyDiagnosticTests(unittest.TestCase):
