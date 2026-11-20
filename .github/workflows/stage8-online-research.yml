@@ -47,7 +47,7 @@ jobs:
         working-directory: ai_intraday_agent_stage1
         continue-on-error: true
         run: |
-          python main.py audit-research-data --directory data/research --interval 5
+          python main.py audit-research-data --directory data/research --interval 5 --session-end 15:15
       - name: Run chronological experiments and cost stress tests
         working-directory: ai_intraday_agent_stage1
         continue-on-error: true
@@ -73,6 +73,7 @@ jobs:
                 --slippage-bps "$scenario" \
                 --fee-rate 0.0003 \
                 --flat-fee 0 \
+                --session-end 15:15 \
                 --report-json "data/research/reports/${symbol}_slippage_${scenario}bps.json"
             done
           done
