@@ -128,11 +128,25 @@ def audit_research_directory(directory: str | Path, interval_minutes: int = 5,
                 "missing_reference_timestamps": len(reference-current),
                 "extra_timestamps_vs_reference": len(current-reference),
                 "matched_timestamps": len(reference & current)}
+        aggregate_issues = []
+        for symbol, entry in symbols.items():
+            audit = entry["completeness"]
+            if not audit["eligible"]:
+                aggregate_issues.append(
+                    f"{symbol}: completeness audit failed ({audit['missing_bars']} missing bars; "
+                    f"{audit['misaligned_bars']} misaligned; {audit['outside_session_bars']} outside session)"
+                )
+        for symbol, details in sync.items():
+            if details["missing_reference_timestamps"] or details["extra_timestamps_vs_reference"]:
+                aggregate_issues.append(
+                    f"{symbol}: timestamp synchronization mismatch vs {chosen} "
+                    f"(missing={details['missing_reference_timestamps']}, "
+                    f"extra={details['extra_timestamps_vs_reference']})"
+                )
         report = {
-            "eligible": all(e["completeness"]["eligible"] for e in symbols.values())
-                and all(v["missing_reference_timestamps"] == 0 and v["extra_timestamps_vs_reference"] == 0 for v in sync.values()),
+            "eligible": not aggregate_issues,
             "symbols": {s: {k:v for k,v in e.items() if k != "timestamps"} for s,e in symbols.items()},
-            "reference_symbol": chosen, "synchronization": sync, "issues": [],
+            "reference_symbol": chosen, "synchronization": sync, "issues": aggregate_issues,
             "as_of": str(_normalize_as_of(as_of)),
             "note": "Cross-symbol comparison uses a reference dataset; it is not an exchange calendar.",
         }
