@@ -40,6 +40,30 @@ class ProviderProbeTests(unittest.TestCase):
         grid=expected_session_grid(pd.Timestamp("2026-11-19").date())
         self.assertEqual(len(grid),75); self.assertEqual(grid[0].strftime("%H:%M"),"09:15"); self.assertEqual(grid[-1].strftime("%H:%M"),"15:25")
 
+    def test_cas_expected_grid_is_72_continuous_bars(self):
+        grid = expected_session_grid(pd.Timestamp("2026-11-19").date(), session_end="15:15")
+        self.assertEqual(len(grid), 72)
+        self.assertEqual(grid[0].strftime("%H:%M"), "09:15")
+        self.assertEqual(grid[-1].strftime("%H:%M"), "15:10")
+
+    def test_cas_probe_reports_post_session_rows_separately(self):
+        continuous = expected_session_grid(pd.Timestamp("2026-11-19").date(), session_end="15:15")
+        post = pd.date_range("2026-11-19 15:15", periods=3, freq="5min", tz="Asia/Kolkata")
+        report = summarize_provider_frame(frame(continuous.append(post)), as_of="2026-11-20 16:00+05:30", session_end="15:15")
+        self.assertEqual(report["missing_completed_bars"], 0)
+        self.assertEqual(report["continuous_session_rows"], 72)
+        self.assertEqual(report["post_session_observations_excluded"], 3)
+        self.assertEqual(report["post_session_time_frequency"], {"15:15": 1, "15:20": 1, "15:25": 1})
+
+    def test_cas_interface_comparison_ignores_post_session_timestamp_differences(self):
+        continuous = expected_session_grid(pd.Timestamp("2026-11-19").date(), session_end="15:15")
+        post = pd.date_range("2026-11-19 15:15", periods=3, freq="5min", tz="Asia/Kolkata")
+        report = compare_frames(frame(continuous.append(post)), frame(continuous), as_of="2026-11-20 16:00+05:30", session_end="15:15")
+        self.assertEqual(report["timestamp_comparison"]["primary_only_timestamps"], 0)
+        self.assertEqual(report["timestamp_comparison"]["matched_timestamps"], 72)
+        self.assertEqual(report["raw_timestamp_comparison"]["primary_only_timestamps"], 3)
+
+
     def test_missing_completed_bar_is_reported_without_repair(self):
         grid=expected_session_grid(pd.Timestamp("2026-11-19").date()); report=summarize_provider_frame(frame(grid.delete(39)),as_of="2026-11-20 16:00:00+05:30")
         self.assertEqual(report["missing_completed_bars"],1); self.assertEqual(report["missing_time_frequency"],{"12:30":1})
