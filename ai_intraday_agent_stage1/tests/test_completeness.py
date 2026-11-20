@@ -40,7 +40,7 @@ class CompletenessAuditTests(unittest.TestCase):
             self.assertEqual(report["symbols"]["A"]["completeness"]["invalid_timestamps"], 1)
             self.assertTrue(any("invalid timestamps" in issue for issue in report["issues"]))
 
-    def test_missing_bar_in_completed_session_is_detected(self)
+    def test_missing_bar_in_completed_session_is_detected(self):
         frame = self.full_session().drop(index=20).reset_index(drop=True)
         report = audit_intraday_completeness(frame, 5, as_of="2026-01-05 16:00+05:30")
         self.assertFalse(report["eligible"])
