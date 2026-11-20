@@ -49,6 +49,15 @@ jobs:
             --start-date "${{ steps.dates.outputs.start }}" \
             --end-date "${{ steps.dates.outputs.end }}" \
             --output-dir data/research
+      - name: Probe missing candles through Yahoo direct Chart API endpoints
+        continue-on-error: true
+        run: |
+          mkdir -p reports
+          python -m market_intelligence.yahoo_gap_probe \
+            --directory data/research \
+            --symbols RELIANCE.NS,TCS.NS,INFY.NS,HDFCBANK.NS,ICICIBANK.NS,SBIN.NS,AXISBANK.NS,KOTAKBANK.NS,BHARTIARTL.NS,ITC.NS \
+            --session-end 15:15 \
+            --output reports/yahoo_gap_probe.json
       - name: Compare yfinance history/download interfaces for recurring missing timestamps
         run: |
           mkdir -p reports
