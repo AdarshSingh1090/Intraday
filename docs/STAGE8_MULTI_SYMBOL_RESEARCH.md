@@ -24,3 +24,23 @@ The end date follows provider semantics (end-exclusive). Start with a smaller li
 - [ ] Review all per-symbol audit reports and missing-session behavior.
 - [ ] Save a data-source snapshot and provider metadata.
 - [ ] Run baseline strategies and cost stress tests on chronological splits.
+
+
+## Stage 8.1 — completeness audit
+
+After downloading per-symbol CSV files, run:
+
+```powershell
+python main.py audit-research-data --directory data/research --interval 5
+```
+
+The audit checks each observed session for missing 5-minute bars, duplicate bars,
+timestamps outside 09:15–15:30 IST, and timestamp alignment. It also compares
+symbols against a reference dataset (the largest file by default) to identify
+cross-symbol timestamp mismatches. It writes `completeness_audit.json`.
+
+**Important:** this is a conservative completeness check, not an NSE exchange
+calendar. It audits dates present in each dataset and cannot identify a missing
+entire trading session or distinguish an exchange holiday from a whole-day data
+gap. A dataset that passes structural and session checks is not automatically
+suitable for backtesting; inspect the report and source quality.
