@@ -81,47 +81,35 @@ jobs:
             --directory data/research \
             --session-end 15:15 \
             --report-json reports/strategy_diagnostics.json
-      - name: Enforce research completeness gate
+      - name: Enforce research completeness and acquisition gate
         id: research_gate
         run: |
           python - <<'PY'
           import json
           import os
           from pathlib import Path
+          from market_intelligence.research_gate import evaluate_research_gate
 
           audit_path = Path("data/research/completeness_audit.json")
-          if audit_path.exists():
-              audit = json.loads(audit_path.read_text(encoding="utf-8"))
-          else:
-              audit = {"eligible": False, "issues": ["completeness audit report was not generated"], "symbols": {}}
-          eligible = audit.get("eligible") is True
-          gate = {
-              "status": "ELIGIBLE" if eligible else "BLOCKED_DATA_QUALITY",
-              "eligible": eligible,
-              "audit_report": str(audit_path),
-              "issues": audit.get("issues", []),
-              "symbols": {
-                  name: {
-                      "missing_bars": item.get("completeness", {}).get("missing_bars"),
-                      "invalid_timestamps": item.get("completeness", {}).get("invalid_timestamps"),
-                      "misaligned_bars": item.get("completeness", {}).get("misaligned_bars"),
-                      "outside_session_bars": item.get("completeness", {}).get("outside_session_bars"),
-                      "eligible": item.get("completeness", {}).get("eligible"),
-                  }
-                  for name, item in audit.get("symbols", {}).items()
-              },
+          manifest_path = Path("data/research/manifest.json")
+          audit = json.loads(audit_path.read_text(encoding="utf-8")) if audit_path.exists() else {
+              "eligible": False, "issues": ["completeness audit report was not generated"], "symbols": {}
           }
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else None
+          gate = evaluate_research_gate(audit, manifest)
+          gate["audit_report"] = str(audit_path)
+          gate["manifest_file"] = str(manifest_path)
           Path("reports").mkdir(exist_ok=True)
           Path("reports/research_gate.json").write_text(json.dumps(gate, indent=2), encoding="utf-8")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"eligible={str(eligible).lower()}\n")
+              output.write(f"eligible={str(gate['eligible']).lower()}\n")
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
               summary.write("## Chronological experiment eligibility\n\n")
               summary.write(f"**Status:** {gate['status']}\n\n")
-              if eligible:
-                  summary.write("Completeness and cross-symbol synchronization passed. Experiments may run.\n")
+              if gate["eligible"]:
+                  summary.write("Acquisition, candle validity, completeness, and cross-symbol synchronization passed. Experiments may run.\n")
               else:
-                  summary.write("Experiments are skipped because data completeness/synchronization failed. No gaps are filled.\n\n")
+                  summary.write("Experiments are skipped because acquisition or data-quality checks failed. No gaps are filled.\n\n")
                   for issue in gate["issues"]:
                       summary.write(f"- {issue}\n")
           print(f"Research eligibility: {gate['status']}")
