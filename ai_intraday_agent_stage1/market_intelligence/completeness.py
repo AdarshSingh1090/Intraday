@@ -107,7 +107,7 @@ def audit_intraday_completeness(
         expected_total += len(expected); missing_total += missing; misaligned_total += misaligned
         outside_total += outside; uncompleted_total += len(uncompleted); post_session_total += len(post_session)
         date_issues=[]
-        if missing: date_issues.append(f"missing completed continuous-session bars: {missing}")
+        if missing: date_issues.append(f"missing completed bars: {missing} (continuous session)")
         if outside: date_issues.append(f"outside market window: {outside}")
         if misaligned: date_issues.append(f"misaligned continuous-session timestamps: {misaligned}")
         if duplicates: date_issues.append(f"duplicate continuous-session timestamps: {duplicates}")
