@@ -66,16 +66,16 @@ jobs:
           Path("reports").mkdir(exist_ok=True)
           Path("reports/research_gate.json").write_text(json.dumps(gate, indent=2), encoding="utf-8")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"eligible={str(gate['eligible']).lower()}\\n")
+              output.write(f"eligible={str(gate['eligible']).lower()}\n")
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
-              summary.write("## Research eligibility\\n\\n")
-              summary.write(f"**Status:** {gate['status']}\\n\\n")
+              summary.write("## Research eligibility\n\n")
+              summary.write(f"**Status:** {gate['status']}\n\n")
               if gate["eligible"]:
-                  summary.write("Acquisition, OHLCV validation, completeness, and synchronization passed. Experiments may run.\\n")
+                  summary.write("Acquisition, OHLCV validation, completeness, and synchronization passed. Experiments may run.\n")
               else:
-                  summary.write("Chronological experiments and cost stress tests are blocked. No candles are repaired or filled.\\n\\n")
+                  summary.write("Chronological experiments and cost stress tests are blocked. No candles are repaired or filled.\n\n")
                   for issue in gate["issues"]:
-                      summary.write(f"- {issue}\\n")
+                      summary.write(f"- {issue}\n")
           print(f"Research eligibility: {gate['status']}")
           PY
       - name: Run chronological experiments and cost stress tests
@@ -88,24 +88,24 @@ jobs:
             [ -f "$file" ] || continue
             symbol="$(basename "$file" "_5m.csv")"
             for scenario in 5 10 20; do
-              report="data/research/reports/$(symbol)_slippage_$(scenario)bps.json"
-              if python main.py research \\
-                --file "$file" \\
-                --symbol "$symbol" \\
-                --interval 5 \\
-                --warmup-bars 60 \\
-                --budget 8900 \\
-                --train-fraction 0.60 \\
-                --validation-fraction 0.20 \\
-                --max-trades-per-day 3 \\
-                --daily-loss-limit-pct 2.0 \\
-                --risk-per-trade-pct 0.5 \\
-                --max-capital-per-trade-pct 35.0 \\
-                --max-portfolio-exposure-pct 70.0 \\
-                --slippage-bps "$scenario" \\
-                --fee-rate 0.0003 \\
-                --flat-fee 0 \\
-                --session-end 15:15 \\
+              report="data/research/reports/$symbol"_slippage_"$scenariobps.json"
+              if python main.py research \
+                --file "$file" \
+                --symbol "$symbol" \
+                --interval 5 \
+                --warmup-bars 60 \
+                --budget 8900 \
+                --train-fraction 0.60 \
+                --validation-fraction 0.20 \
+                --max-trades-per-day 3 \
+                --daily-loss-limit-pct 2.0 \
+                --risk-per-trade-pct 0.5 \
+                --max-capital-per-trade-pct 35.0 \
+                --max-portfolio-exposure-pct 70.0 \
+                --slippage-bps "$scenario" \
+                --fee-rate 0.0003 \
+                --flat-fee 0 \
+                --session-end 15:15 \
                 --report-json "$report"; then
                 echo "Completed: $report"
               else
@@ -129,5 +129,6 @@ jobs:
             ai_intraday_agent_stage1/data/research/manifest.json
             ai_intraday_agent_stage1/data/research/completeness_audit.json
             ai_intraday_agent_stage1/data/research/reports/*.json
+            ai_intraday_agent_stage1/reports/research_gate.json
           if-no-files-found: warn
           retention-days: 7
