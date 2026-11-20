@@ -1,13 +1,6 @@
 name: Historical Research Data & First Experiments
 
 on:
-  push:
-    branches:
-      - stage8-multi-stock-research
-    paths:
-      - "ai_intraday_agent_stage1/market_intelligence/**"
-      - "ai_intraday_agent_stage1/main.py"
-      - ".github/workflows/historical-research.yml"
   workflow_dispatch:
 
 concurrency:
