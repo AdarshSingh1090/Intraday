@@ -49,6 +49,12 @@ jobs:
         continue-on-error: true
         run: |
           python main.py audit-research-data --directory data/research --interval 5
+      - name: Run strategy filter diagnostics
+        run: |
+          mkdir -p reports
+          python main.py strategy-diagnostics \
+            --directory data/research \
+            --report-json reports/strategy_diagnostics.json
       - name: Run chronological experiments and cost stress tests
         shell: bash
         run: |
