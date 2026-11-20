@@ -34,8 +34,11 @@ After downloading per-symbol CSV files, run:
 python main.py audit-research-data --directory data/research --interval 5
 ```
 
-The audit checks each observed session for missing 5-minute bars, duplicate bars,
-timestamps outside 09:15–15:30 IST, and timestamp alignment. It also compares
+The audit checks each observed session for missing continuous-session bars, duplicates,
+outside-market timestamps, and alignment. For CAS-eligible F&O stocks, pass
+`--session-end 15:15` (09:15–15:15, end-exclusive; 72 five-minute bars). Auction/post-session
+observations are counted separately and excluded from completeness and synchronization;
+they are never filled and are excluded from continuous-session experiments. It also compares
 symbols against a reference dataset (the largest file by default) to identify
 cross-symbol timestamp mismatches. It writes `completeness_audit.json`.
 
