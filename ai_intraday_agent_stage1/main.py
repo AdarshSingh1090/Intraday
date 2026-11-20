@@ -306,7 +306,7 @@ def cmd_audit_research_data(args):
 
 def cmd_strategy_diagnostics(args):
     report = diagnose_directory(args.directory)
-    print("\\nSTAGE 8.2 STRATEGY FILTER DIAGNOSTICS")
+    print("\nSTAGE 8.2 STRATEGY FILTER DIAGNOSTICS")
     print("=" * 72)
     aggregate = report["aggregate"]
     print(f"Directional observations: {aggregate['directional_observations']}")
@@ -315,7 +315,7 @@ def cmd_strategy_diagnostics(args):
         item = aggregate["filter_summary"][name]
         rate = item["pass_rate_pct"]
         print(f"  {name}: {item['passed']}/{item['tested']} ({rate if rate is not None else 'n/a'}%)")
-    print("\\nScenario pass counts by symbol:")
+    print("\nScenario pass counts by symbol:")
     for symbol, details in report["symbols"].items():
         print(f"  {symbol}: directional={details['directional_observations']}")
         for scenario, item in details["scenarios"].items():
