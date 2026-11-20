@@ -24,6 +24,8 @@ def diagnose_file(path, symbol, interval=5, warmup=60, stride=1):
     status_counts = Counter()
     blocker_counts = Counter()
     no_setup_reasons = Counter()
+    insufficient_data_reasons = Counter()
+    other_status_reasons = Counter()
     candidate_timestamps = []
     samples = 0
 
@@ -46,6 +48,9 @@ def diagnose_file(path, symbol, interval=5, warmup=60, stride=1):
         if setup.get("status") == "BLOCKED":
             for reason in setup.get("reasons", []):
                 blocker_counts[reason] += 1
+        elif setup.get("status") == "INSUFFICIENT_DATA":
+            for reason in setup.get("reasons", []):
+                insufficient_data_reasons[reason] += 1
         elif setup.get("status") == "NO_SETUP":
             for reason in setup.get("reasons", []):
                 no_setup_reasons[reason] += 1
@@ -56,6 +61,9 @@ def diagnose_file(path, symbol, interval=5, warmup=60, stride=1):
                 no_setup_reasons[f"hard filter: {reason}"] += 1
         elif setup.get("status") == "CANDIDATE":
             candidate_timestamps.append(str(now))
+        else:
+            for reason in setup.get("reasons", []):
+                other_status_reasons[f"{setup.get('status')}: {reason}"] += 1
 
     return {
         "symbol": symbol,
@@ -66,6 +74,8 @@ def diagnose_file(path, symbol, interval=5, warmup=60, stride=1):
         "status_counts": dict(status_counts),
         "blocker_counts": dict(blocker_counts.most_common(20)),
         "no_setup_reasons": dict(no_setup_reasons.most_common(30)),
+        "insufficient_data_reasons": dict(insufficient_data_reasons.most_common(30)),
+        "other_status_reasons": dict(other_status_reasons.most_common(30)),
         "candidate_timestamps": candidate_timestamps,
         "paper_only": True,
         "execution": "none",
@@ -89,7 +99,8 @@ def main():
     out.write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
     print(json.dumps({k: result[k] for k in (
         "symbol", "rows", "sampled_bars", "status_counts",
-        "blocker_counts", "no_setup_reasons", "candidate_timestamps"
+        "blocker_counts", "no_setup_reasons", "insufficient_data_reasons",
+        "other_status_reasons", "candidate_timestamps"
     )}, indent=2))
     print("PAPER ONLY | EXECUTION NONE")
 
