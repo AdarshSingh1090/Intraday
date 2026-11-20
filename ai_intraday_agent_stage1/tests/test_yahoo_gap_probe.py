@@ -75,7 +75,7 @@ class YahooGapProbeTests(unittest.TestCase):
         })
         # NSE/OpenChart examples use end-of-bar timestamps; this candle is
         # labeled 11:49:59 and should map to the 11:45 five-minute bar.
-        source_index = pd.DatetimeIndex([pd.Timestamp("2026-10-15 11:49:59+05:30")])
+        source_index = pd.DatetimeIndex([pd.Timestamp("2026-10-15 11:49:59+05:30")], name="Timestamp")
         source = pd.DataFrame({"Open":[100.0],"High":[101.0],"Low":[99.0],"Close":[100.5],"Volume":[2000]},index=source_index)
         fake_client = SimpleNamespace(historical=lambda **kwargs: source)
         with tempfile.TemporaryDirectory() as temp:

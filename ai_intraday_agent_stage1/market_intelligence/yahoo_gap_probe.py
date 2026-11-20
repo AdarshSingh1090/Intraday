@@ -298,6 +298,8 @@ def probe_openchart_missing_bars(directory, symbols, output, session_start="09:1
                         data = data.reset_index()
                     aliases = {str(c).lower(): c for c in data.columns}
                     time_col = next((aliases[k] for k in ("timestamp", "datetime", "date") if k in aliases), None)
+                    if time_col is None and "index" in aliases:
+                        time_col = aliases["index"]
                     if time_col is None:
                         raise ValueError("OpenChart frame lacks timestamp column")
                     data["timestamp"] = pd.to_datetime(data[time_col], errors="coerce")
