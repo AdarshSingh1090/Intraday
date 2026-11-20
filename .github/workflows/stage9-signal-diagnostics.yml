@@ -8,6 +8,7 @@ on:
     paths:
       - ".github/workflows/stage9-signal-diagnostics.yml"
       - "ai_intraday_agent_stage1/market_intelligence/**"
+      - "ai_intraday_agent_stage1/main.py"
 
 concurrency:
   group: stage9-signal-diagnostics-${{ github.ref }}
@@ -52,7 +53,7 @@ jobs:
       - name: Run data completeness audit
         working-directory: ai_intraday_agent_stage1
         continue-on-error: true
-        run: python main.py audit-research-data --directory data/research --interval 5
+        run: python main.py audit-research-data --directory data/research --interval 5 --session-end 15:15
       - name: Diagnose signal frequency and rejection reasons
         working-directory: ai_intraday_agent_stage1
         continue-on-error: true
@@ -64,6 +65,7 @@ jobs:
             python -m market_intelligence.signal_diagnostics \
               --file "$file" --symbol "$symbol" --interval 5 \
               --warmup-bars 60 --stride-bars 1 \
+              --session-end 15:15 \
               --output "data/research/diagnostics/${symbol}_signals.json"
           done
       - name: Summarize signal diagnostics
