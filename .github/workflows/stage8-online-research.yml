@@ -1,0 +1,64 @@
+name: Stage 8 Online Research Data Collection
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - stage8-multi-stock-research
+    paths:
+      - ".github/workflows/stage8-online-research.yml"
+      - "ai_intraday_agent_stage1/market_intelligence/**"
+      - "ai_intraday_agent_stage1/main.py"
+
+permissions:
+  contents: read
+
+jobs:
+  collect-and-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install project dependencies
+        working-directory: ai_intraday_agent_stage1
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Set research date window
+        id: dates
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          from datetime import datetime, timedelta
+          from zoneinfo import ZoneInfo
+          today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
+          print(f"start={today - timedelta(days=30)}")
+          print(f"end={today + timedelta(days=1)}")
+          PY
+      - name: Fetch recent 5-minute NSE data
+        working-directory: ai_intraday_agent_stage1
+        run: |
+          python main.py fetch-research-data \
+            --symbols RELIANCE.NS,TCS.NS,HDFCBANK.NS,ICICIBANK.NS,INFY.NS \
+            --interval 5 \
+            --start-date "${{ steps.dates.outputs.start }}" \
+            --end-date "${{ steps.dates.outputs.end }}" \
+            --output-dir data/research
+      - name: Run completeness and synchronization audit
+        working-directory: ai_intraday_agent_stage1
+        continue-on-error: true
+        run: |
+          python main.py audit-research-data --directory data/research --interval 5
+      - name: Upload research datasets and audit reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage8-research-data-${{ github.run_number }}
+          path: |
+            ai_intraday_agent_stage1/data/research/*.csv
+            ai_intraday_agent_stage1/data/research/manifest.json
+            ai_intraday_agent_stage1/data/research/completeness_audit.json
+          if-no-files-found: warn
+          retention-days: 7
