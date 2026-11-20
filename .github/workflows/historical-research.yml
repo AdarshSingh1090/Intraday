@@ -70,6 +70,12 @@ jobs:
             --symbols RELIANCE.NS,TCS.NS,INFY.NS,HDFCBANK.NS,ICICIBANK.NS,SBIN.NS,AXISBANK.NS,KOTAKBANK.NS,BHARTIARTL.NS,ITC.NS \
             --session-end 15:15 \
             --output reports/yahoo_alternate_interval_probe.json
+      - name: Diagnose Hugging Face Dataset Viewer endpoints and metadata-only Parquet manifest
+        continue-on-error: true
+        run: |
+          mkdir -p reports
+          python -m market_intelligence.huggingface_api_diagnostics \
+            --output reports/huggingface_api_diagnostics.json
       - name: Probe public Hugging Face 1-minute dataset for exact recovery candidates
         continue-on-error: true
         run: |
