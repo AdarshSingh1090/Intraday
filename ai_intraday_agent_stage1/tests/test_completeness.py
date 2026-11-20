@@ -9,46 +9,77 @@ from market_intelligence.completeness import (
 
 
 class CompletenessAuditTests(unittest.TestCase):
-    def full_session(self):
-        ts = pd.date_range("2026-01-05 09:15", "2026-01-05 15:25", freq="5min", tz="Asia/Kolkata")
+    def full_session(self, date="2026-01-05"):
+        ts = pd.date_range(f"{date} 09:15", f"{date} 15:25", freq="5min", tz="Asia/Kolkata")
         return pd.DataFrame({"timestamp": ts, "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000})
 
     def test_full_nse_session_75_bars_passes(self):
-        report = audit_intraday_completeness(self.full_session(), 5)
+        report = audit_intraday_completeness(self.full_session(), 5, as_of="2026-01-05 16:00+05:30")
         self.assertTrue(report["eligible"])
         self.assertEqual(report["expected_bars_on_observed_dates"], 75)
         self.assertEqual(report["missing_bars"], 0)
+        self.assertFalse(report["per_date"]["2026-01-05"]["partial_session"])
 
-    def test_missing_bar_is_detected(self):
+    def test_missing_bar_in_completed_session_is_detected(self):
         frame = self.full_session().drop(index=20).reset_index(drop=True)
-        report = audit_intraday_completeness(frame, 5)
+        report = audit_intraday_completeness(frame, 5, as_of="2026-01-05 16:00+05:30")
         self.assertFalse(report["eligible"])
         self.assertEqual(report["missing_bars"], 1)
-        self.assertTrue(any("missing bars: 1" in x for x in report["issues"]))
+        self.assertTrue(any("missing completed bars: 1" in x for x in report["issues"]))
+
+    def test_partial_current_session_does_not_count_future_session_slots_as_missing(self):
+        frame = self.full_session().iloc[:53].reset_index(drop=True)  # through 13:35; forming candle
+        report = audit_intraday_completeness(frame, 5, as_of="2026-01-05 13:37+05:30")
+        day = report["per_date"]["2026-01-05"]
+        self.assertTrue(report["eligible"])
+        self.assertTrue(day["partial_session"])
+        self.assertEqual(day["full_session_expected_bars"], 75)
+        self.assertEqual(day["expected_bars"], 52)  # through 13:30, completed candle starts
+        self.assertEqual(day["observed_completed_bars"], 52)
+        self.assertEqual(day["uncompleted_bars_excluded"], 1)
+        self.assertEqual(day["missing_bars"], 0)
+
+    def test_missing_completed_bar_before_partial_cutoff_is_detected(self):
+        frame = self.full_session().iloc[:53].drop(index=51).reset_index(drop=True)
+        report = audit_intraday_completeness(frame, 5, as_of="2026-01-05 13:37+05:30")
+        self.assertFalse(report["eligible"])
+        self.assertEqual(report["missing_bars"], 1)
 
     def test_out_of_session_and_alignment_are_detected(self):
         frame = self.full_session()
         frame.loc[0, "timestamp"] = pd.Timestamp("2026-01-05 09:17", tz="Asia/Kolkata")
         frame.loc[1, "timestamp"] = pd.Timestamp("2026-01-05 08:55", tz="Asia/Kolkata")
-        report = audit_intraday_completeness(frame, 5)
+        report = audit_intraday_completeness(frame, 5, as_of="2026-01-05 16:00+05:30")
         self.assertFalse(report["eligible"])
         self.assertGreater(report["outside_session_bars"], 0)
         self.assertGreater(report["misaligned_bars"], 0)
 
-    def test_cross_symbol_timestamp_mismatch(self):
+    def test_cross_symbol_timestamp_mismatch_on_completed_bars(self):
         with tempfile.TemporaryDirectory() as tmp:
             a = self.full_session()
             b = a.drop(index=10).reset_index(drop=True)
             a.to_csv(Path(tmp, "A.csv"), index=False)
             b.to_csv(Path(tmp, "B.csv"), index=False)
-            report = audit_research_directory(tmp, 5, "A")
+            report = audit_research_directory(tmp, 5, "A", as_of="2026-01-05 16:00+05:30")
             self.assertFalse(report["eligible"])
             self.assertEqual(report["synchronization"]["B"]["missing_reference_timestamps"], 1)
+            self.assertTrue(any("B: completeness audit failed" in issue for issue in report["issues"]))
+            self.assertTrue(any("B: timestamp synchronization mismatch" in issue for issue in report["issues"]))
             self.assertTrue(Path(tmp, "completeness_audit.json").exists())
+
+    def test_sync_ignores_unfinished_bar_for_current_partial_session(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            a = self.full_session().iloc[:53].reset_index(drop=True)  # 13:35 unfinished
+            b = self.full_session().iloc[:52].reset_index(drop=True)  # through 13:30
+            a.to_csv(Path(tmp, "A.csv"), index=False)
+            b.to_csv(Path(tmp, "B.csv"), index=False)
+            report = audit_research_directory(tmp, 5, "A", as_of="2026-01-05 13:37+05:30")
+            self.assertEqual(report["synchronization"]["B"]["missing_reference_timestamps"], 0)
+            self.assertEqual(report["synchronization"]["B"]["extra_timestamps_vs_reference"], 0)
 
     def test_empty_directory_is_ineligible(self):
         with tempfile.TemporaryDirectory() as tmp:
-            report = audit_research_directory(tmp)
+            report = audit_research_directory(tmp, as_of="2026-01-05 16:00+05:30")
             self.assertFalse(report["eligible"])
             self.assertIn("no CSV datasets found", report["issues"])
 
