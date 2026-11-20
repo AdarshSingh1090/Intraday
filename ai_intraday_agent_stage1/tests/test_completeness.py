@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -89,9 +90,9 @@ class CompletenessAuditTests(unittest.TestCase):
                     "B": {"status": "SAVED", "audit": {"eligible": True}},
                 }
             }
-            Path(tmp, "manifest.json").write_text(__import__("json").dumps(manifest), encoding="utf-8")
+            Path(tmp, "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
             report = audit_research_directory(tmp, 5, "A", as_of="2026-01-05 16:00+05:30")
-            updated = __import__("json").loads(Path(tmp, "manifest.json").read_text(encoding="utf-8"))
+            updated = json.loads(Path(tmp, "manifest.json").read_text(encoding="utf-8"))
             self.assertFalse(updated["completeness_audit"]["eligible"])
             self.assertEqual(updated["completeness_audit"]["audited_symbols"], 2)
             self.assertTrue(updated["results"]["A"]["research_eligibility"]["eligible"])
