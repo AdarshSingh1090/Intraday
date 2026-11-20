@@ -10,6 +10,7 @@ from market_intelligence.screener import calculate_screening_metrics
 from market_intelligence.strategy import StrategyConfig
 
 FILTERS = ["trend_strength", "ema_alignment", "rsi", "momentum", "relative_volume", "ema_extension", "candle_confirmation"]
+REQUIRED_INDICATORS = ["ema_20", "ema_50", "rsi_14", "atr_14", "ema_20_slope_percent"]
 
 
 def _rank_strength(value):
@@ -83,16 +84,19 @@ def diagnose_symbol(frame, symbol, config=None):
         raise ValueError(f"{symbol}: invalid timestamps")
     data = data.sort_values("timestamp").reset_index(drop=True)
     indicators = calculate_indicators(data)
+    missing_indicators = sorted(set(REQUIRED_INDICATORS) - set(indicators.columns))
+    if missing_indicators:
+        raise ValueError(f"{symbol}: indicator pipeline missing required indicators: {missing_indicators}")
     screening = calculate_screening_metrics(indicators)
     enriched = screening.get("data", indicators).copy()
-    # Reproduce the regime module's five-bar EMA20 slope calculation causally.
-    enriched["ema_20_slope_percent"] = ((enriched["ema_20"] - enriched["ema_20"].shift(5)) / enriched["ema_20"].shift(5)) * 100
+    # Consume the shared indicator pipeline's slope. Do not recompute a local
+    # copy here, or diagnostics could mask a regression in calculate_indicators.
     enriched["trend_strength"] = enriched.apply(_trend_strength, axis=1)
 
     rows = []
     valid_indicator_rows = 0
     for _, row in enriched.iterrows():
-        if not all(pd.notna(row.get(c)) for c in ("ema_20", "ema_50", "rsi_14", "atr_14", "ema_20_slope_percent")):
+        if not all(pd.notna(row.get(c)) for c in REQUIRED_INDICATORS):
             continue
         valid_indicator_rows += 1
         direction = _direction_for_row(row, allow_short=config.allow_short)
