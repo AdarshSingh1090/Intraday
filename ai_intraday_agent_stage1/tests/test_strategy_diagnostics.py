@@ -1,8 +1,10 @@
 import unittest
+from unittest.mock import patch
 import pandas as pd
 
 from market_intelligence.strategy_diagnostics import diagnose_symbol, diagnose_directory, FILTERS
 from market_intelligence.strategy import StrategyConfig
+from market_intelligence.indicators import calculate_indicators
 
 
 def make_frame(n=140, mode="up"):
@@ -25,6 +27,17 @@ class StrategyDiagnosticTests(unittest.TestCase):
         self.assertIn("remove_rsi_and_relative_volume", result["scenarios"])
         self.assertIn("strategy_baseline_hard_filters_plus_minimum_score", result["scenarios"])
         self.assertGreater(result["directional_observations"], 0)
+
+    def test_diagnostics_fail_loudly_if_shared_slope_missing(self):
+        frame = make_frame()
+        original = calculate_indicators
+
+        def without_slope(data):
+            return original(data).drop(columns=["ema_20_slope_percent"])
+
+        with patch("market_intelligence.strategy_diagnostics.calculate_indicators", side_effect=without_slope):
+            with self.assertRaisesRegex(ValueError, "indicator pipeline missing required indicators.*ema_20_slope_percent"):
+                diagnose_symbol(frame, "TEST")
 
     def test_no_auto_winner_field(self):
         result = diagnose_symbol(make_frame(), "TEST")
