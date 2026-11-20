@@ -143,7 +143,8 @@ def run_independent_probe(symbols,start,end,yahoo_dir,output,token=None,session=
     import requests
     session=session or requests.Session(); reports={}
     result={'purpose':'independent-provider completeness comparison; no repair or tuning','provider':'Upstox historical candle V3',
-      'independent_provider_comparison':True,'interval_minutes':5,'timezone':TIMEZONE,'start':start,'end_exclusive':end,\n      'session':{'start':session_start,'end_exclusive':session_end,'post_session_window_end':post_session_end},
+      'independent_provider_comparison':True,'interval_minutes':5,'timezone':TIMEZONE,'start':start,'end_exclusive':end,
+      'session':{'start':session_start,'end_exclusive':session_end,'post_session_window_end':post_session_end},
       'status':'SKIPPED_NO_TOKEN','skip_reason':'UPSTOX_ACCESS_TOKEN is not configured; Yahoo-only data cannot establish source completeness.','reports':reports}
     if not token:
         Path(output).parent.mkdir(parents=True,exist_ok=True); Path(output).write_text(json.dumps(result,indent=2),encoding='utf-8'); return result
