@@ -27,6 +27,6 @@ The directory should contain per-symbol OHLCV CSVs (timestamp, open, high, low, 
 - Filter removal is a what-if diagnostic, not a recommendation.
 - No winner or preferred parameter set is produced.
 - Indicators are calculated chronologically using current/prior data; no forward outcome is used.
-- The diagnostic universe is trend-aligned observations. It separately reports valid-indicator rows to show the size of the upstream universe.
+- The diagnostic universe is observations oriented by EMA20 slope sign (long when positive, short when negative), so EMA alignment is tested independently. It separately reports valid-indicator rows.
 - Data completeness and session coverage should be assessed separately before drawing conclusions.
 - Paper-only; no broker execution.
