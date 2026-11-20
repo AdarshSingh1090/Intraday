@@ -30,7 +30,7 @@ from market_intelligence.quality_gate import QualityConfig
 from market_intelligence.strategy import generate_setup, StrategyConfig
 
 
-def diagnose_file(path, symbol, interval=5, warmup=60, stride=1, as_of=None):
+def diagnose_file(path, symbol, interval=5, warmup=60, stride=1, as_of=None, session_start="09:15", session_end="15:30", post_session_end="16:00"):
     df = pd.read_csv(path)
     raw_rows = int(len(df))
     required = {"timestamp", "open", "high", "low", "close", "volume"}
@@ -44,7 +44,18 @@ def diagnose_file(path, symbol, interval=5, warmup=60, stride=1, as_of=None):
     cutoff = _as_of_timestamp(as_of)
     completed_mask = df["timestamp"] + pd.Timedelta(minutes=interval) <= cutoff
     uncompleted_rows_excluded = int((~completed_mask).sum())
-    df = df.loc[completed_mask].reset_index(drop=True)
+    completed = df.loc[completed_mask].reset_index(drop=True)
+    start_time = pd.to_datetime(session_start).time()
+    end_time = pd.to_datetime(session_end).time()
+    post_end_time = pd.to_datetime(post_session_end).time()
+    if not (start_time < end_time <= post_end_time):
+        raise ValueError("session_start must be before session_end, and session_end must not exceed post_session_end")
+    in_session = (completed["timestamp"].dt.time >= start_time) & (completed["timestamp"].dt.time < end_time)
+    post_session = (completed["timestamp"].dt.time >= end_time) & (completed["timestamp"].dt.time < post_end_time)
+    outside_market = (completed["timestamp"].dt.time < start_time) | (completed["timestamp"].dt.time >= post_end_time)
+    post_session_rows_excluded = int(post_session.sum())
+    outside_market_rows_excluded = int(outside_market.sum())
+    df = completed.loc[in_session].reset_index(drop=True)
     status_counts = Counter()
     blocker_counts = Counter()
     no_setup_reasons = Counter()
@@ -113,8 +124,12 @@ def diagnose_file(path, symbol, interval=5, warmup=60, stride=1, as_of=None):
         "symbol": symbol,
         "file": str(path),
         "rows": raw_rows,
-        "completed_rows": int(len(df)),
+        "completed_rows": int(len(completed)),
+        "session_rows": int(len(df)),
         "uncompleted_rows_excluded": uncompleted_rows_excluded,
+        "post_session_rows_excluded": post_session_rows_excluded,
+        "outside_market_window_rows_excluded": outside_market_rows_excluded,
+        "session": {"start": session_start, "end_exclusive": session_end, "post_session_window_end": post_session_end},
         "as_of_timestamp": str(cutoff),
         "last_sampled_timestamp": last_sampled_timestamp,
         "sampled_bars": samples,
@@ -147,15 +162,19 @@ def main():
     parser.add_argument("--warmup-bars", type=int, default=60)
     parser.add_argument("--stride-bars", type=int, default=1)
     parser.add_argument("--as-of", help="Timezone-aware or IST-local cutoff for excluding incomplete candles")
+    parser.add_argument("--session-start", default="09:15")
+    parser.add_argument("--session-end", default="15:30", help="Exclusive continuous-session end.")
+    parser.add_argument("--post-session-end", default="16:00")
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
     result = diagnose_file(args.file, args.symbol, args.interval,
-                           args.warmup_bars, args.stride_bars, args.as_of)
+                           args.warmup_bars, args.stride_bars, args.as_of,
+                           args.session_start, args.session_end, args.post_session_end)
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
     print(json.dumps({k: result[k] for k in (
-        "symbol", "rows", "sampled_bars", "status_counts",
+        "symbol", "rows", "completed_rows", "session_rows", "post_session_rows_excluded", "sampled_bars", "status_counts",
         "blocker_counts", "no_setup_reasons", "insufficient_data_reasons",
         "other_status_reasons", "strategy_filter_pass_counts",
         "strategy_filter_fail_counts", "strategy_filter_pass_rates", "candidate_timestamps"
