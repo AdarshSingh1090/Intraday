@@ -6,21 +6,45 @@ from collections import Counter
 from pathlib import Path
 import pandas as pd
 
+TIMEZONE = "Asia/Kolkata"
+
+
+def _market_time(values):
+    timestamps = pd.to_datetime(values, errors="coerce")
+    if timestamps.dt.tz is None:
+        return timestamps.dt.tz_localize(TIMEZONE, ambiguous="NaT", nonexistent="NaT")
+    return timestamps.dt.tz_convert(TIMEZONE)
+
+
+def _as_of_timestamp(as_of=None):
+    if as_of is None:
+        return pd.Timestamp.now(tz=TIMEZONE)
+    timestamp = pd.Timestamp(as_of)
+    if timestamp.tzinfo is None:
+        return timestamp.tz_localize(TIMEZONE)
+    return timestamp.tz_convert(TIMEZONE)
+
+
 from market_intelligence.evaluation import evaluate_market_data
 from market_intelligence.quality_gate import QualityConfig
 from market_intelligence.strategy import generate_setup, StrategyConfig
 
 
-def diagnose_file(path, symbol, interval=5, warmup=60, stride=1):
+def diagnose_file(path, symbol, interval=5, warmup=60, stride=1, as_of=None):
     df = pd.read_csv(path)
+    raw_rows = int(len(df))
     required = {"timestamp", "open", "high", "low", "close", "volume"}
     if not required.issubset(df.columns):
         raise ValueError(f"Missing OHLCV columns: {sorted(required - set(df.columns))}")
-    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+    df["timestamp"] = _market_time(df["timestamp"])
     df = df.dropna(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
     for col in ("open", "high", "low", "close", "volume"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df = df.dropna(subset=["open", "high", "low", "close", "volume"])
+    cutoff = _as_of_timestamp(as_of)
+    completed_mask = df["timestamp"] + pd.Timedelta(minutes=interval) <= cutoff
+    uncompleted_rows_excluded = int((~completed_mask).sum())
+    df = df.loc[completed_mask].reset_index(drop=True)
     status_counts = Counter()
     blocker_counts = Counter()
     no_setup_reasons = Counter()
@@ -31,11 +55,14 @@ def diagnose_file(path, symbol, interval=5, warmup=60, stride=1):
     candidate_timestamps = []
     samples = 0
     eligible_setup_samples = 0
+    last_sampled_timestamp = None
 
     # Evaluate the same strict data gate as the production research backtester.
     for i in range(max(warmup, 1), len(df), stride):
         window = df.iloc[:i + 1].copy()
-        now = window.iloc[-1]["timestamp"]
+        bar_timestamp = window.iloc[-1]["timestamp"]
+        now = bar_timestamp + pd.Timedelta(minutes=interval)
+        last_sampled_timestamp = str(bar_timestamp)
         qcfg = QualityConfig(
             freshness_minutes=10**9,
             recent_window=min(20, len(window)),
@@ -69,7 +96,7 @@ def diagnose_file(path, symbol, interval=5, warmup=60, stride=1):
             for reason in diag.get("hard_filter_failures", []):
                 no_setup_reasons[f"hard filter: {reason}"] += 1
         elif setup.get("status") == "CANDIDATE":
-            candidate_timestamps.append(str(now))
+            candidate_timestamps.append(str(bar_timestamp))
             diag = setup.get("diagnostics") or {}
             passed_checks = setup.get("reasons", [])
             failed_checks = diag.get("failed_checks", [])
@@ -85,7 +112,11 @@ def diagnose_file(path, symbol, interval=5, warmup=60, stride=1):
     return {
         "symbol": symbol,
         "file": str(path),
-        "rows": int(len(df)),
+        "rows": raw_rows,
+        "completed_rows": int(len(df)),
+        "uncompleted_rows_excluded": uncompleted_rows_excluded,
+        "as_of_timestamp": str(cutoff),
+        "last_sampled_timestamp": last_sampled_timestamp,
         "sampled_bars": samples,
         "stride_bars": stride,
         "status_counts": dict(status_counts),
@@ -115,10 +146,11 @@ def main():
     parser.add_argument("--interval", type=int, default=5)
     parser.add_argument("--warmup-bars", type=int, default=60)
     parser.add_argument("--stride-bars", type=int, default=1)
+    parser.add_argument("--as-of", help="Timezone-aware or IST-local cutoff for excluding incomplete candles")
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
     result = diagnose_file(args.file, args.symbol, args.interval,
-                           args.warmup_bars, args.stride_bars)
+                           args.warmup_bars, args.stride_bars, args.as_of)
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
