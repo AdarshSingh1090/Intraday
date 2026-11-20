@@ -23,6 +23,7 @@ class CompletenessAuditTests(unittest.TestCase):
 
     def test_invalid_timestamp_row_blocks_completeness(self):
         frame = self.full_session()
+        frame["timestamp"] = frame["timestamp"].astype(object)
         frame.loc[20, "timestamp"] = "not-a-timestamp"
         report = audit_intraday_completeness(frame, 5, as_of="2026-01-05 16:00+05:30")
         self.assertFalse(report["eligible"])
@@ -33,6 +34,7 @@ class CompletenessAuditTests(unittest.TestCase):
     def test_directory_audit_propagates_invalid_timestamp_blocker(self):
         with tempfile.TemporaryDirectory() as tmp:
             frame = self.full_session()
+            frame["timestamp"] = frame["timestamp"].astype(object)
             frame.loc[20, "timestamp"] = "not-a-timestamp"
             frame.to_csv(Path(tmp, "A.csv"), index=False)
             report = audit_research_directory(tmp, 5, "A", as_of="2026-01-05 16:00+05:30")
