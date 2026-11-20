@@ -86,7 +86,7 @@ jobs:
             echo "=== Experiment: $symbol ==="
             run_experiment "reports/${symbol}_base.json" --file "$file" --symbol "$symbol" --interval 5 --budget 8900
             run_experiment "reports/${symbol}_stress_2x.json" --file "$file" --symbol "$symbol" --interval 5 --budget 8900 --slippage-bps 10 --fee-rate 0.0006
-            run_experiment "reports/${symbol}_stress_4x.json" --file "$file" --symbol "$symbol" --interval 5 --budget 8900 --slippage-bps 20 --fee-rate 0.0009
+            run_experiment "reports/${symbol}_stress_4x.json" --file "$file" --symbol "$symbol" --interval 5 --budget 8900 --slippage-bps 20 --fee-rate 0.0012
           done
           if [ "$failures" -gt 0 ]; then
             echo "::error::$failures experiment report(s) failed; see logs and uploaded artifact."
