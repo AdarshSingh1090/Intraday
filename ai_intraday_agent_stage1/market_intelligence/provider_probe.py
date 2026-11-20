@@ -124,8 +124,8 @@ def run_probe(symbols, start, end, output):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--symbols", default="RELIANCE.NS,TCS.NS,HDFCBANK.NS,ICICIBANK.NS,INFY.NS")
-    parser.add_argument("--start", required=True)
-    parser.add_argument("--end", required=True)
+    parser.add_argument("--start", "--start-date", dest="start", required=True)
+    parser.add_argument("--end", "--end-date", dest="end", required=True)
     parser.add_argument("--output", default="reports/yahoo_provider_probe.json")
     args = parser.parse_args()
     result = run_probe([s.strip() for s in args.symbols.split(",") if s.strip()], args.start, args.end, args.output)
