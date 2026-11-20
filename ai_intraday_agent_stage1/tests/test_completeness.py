@@ -64,6 +64,8 @@ class CompletenessAuditTests(unittest.TestCase):
             report = audit_research_directory(tmp, 5, "A", as_of="2026-01-06 12:00")
             self.assertFalse(report["eligible"])
             self.assertEqual(report["synchronization"]["B"]["missing_reference_timestamps"], 1)
+            self.assertTrue(any("B: completeness audit failed" in issue for issue in report["issues"]))
+            self.assertTrue(any("B: timestamp synchronization mismatch" in issue for issue in report["issues"]))
             self.assertTrue(Path(tmp, "completeness_audit.json").exists())
 
     def test_empty_directory_is_ineligible(self):
