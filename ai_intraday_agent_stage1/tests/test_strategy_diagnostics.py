@@ -62,5 +62,32 @@ class StrategyDiagnosticTests(unittest.TestCase):
             diagnose_symbol(pd.DataFrame(), "EMPTY")
 
 
+    def test_strategy_baseline_requires_regime_ema_alignment(self):
+        # Positive EMA slope alone is not enough to establish a bullish regime.
+        # If close is below EMA20, the actual strategy classifies this row as
+        # sideways and must not count it as a baseline setup, even when the
+        # other five scored checks pass.
+        def frame(aligned):
+            close = 100.5 if aligned else 99.5
+            open_price = 101.0 if aligned else 99.0
+            return pd.DataFrame([{
+                "timestamp": pd.Timestamp("2026-11-01 09:15", tz="Asia/Kolkata"),
+                "open": open_price, "high": 101.2, "low": 98.8, "close": close,
+                "volume": 1500, "ema_20": 100.0, "ema_50": 99.0,
+                "rsi_14": 60.0, "atr_14": 1.0,
+                "ema_20_slope_percent": 0.02, "ema20_vs_ema50_percent": 0.10,
+                "relative_volume": 1.5,
+            }])
+
+        for aligned, expected in ((False, 0), (True, 1)):
+            data = frame(aligned)
+            with patch("market_intelligence.strategy_diagnostics.calculate_indicators", return_value=data.copy()):
+                with patch("market_intelligence.strategy_diagnostics.calculate_screening_metrics", return_value={"data": data.copy()}):
+                    result = diagnose_symbol(data, "TEST", StrategyConfig())
+            row = result["diagnostic_rows"][0]
+            self.assertEqual(row["ema_alignment"], aligned)
+            self.assertEqual(row["score"], 5)
+            self.assertEqual(row["baseline_strategy_pass"], bool(expected))
+            self.assertEqual(result["scenarios"]["strategy_baseline_hard_filters_plus_minimum_score"]["passing_observations"], expected)
 if __name__ == "__main__":
     unittest.main()
