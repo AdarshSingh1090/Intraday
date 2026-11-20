@@ -100,6 +100,32 @@ class CompletenessAuditTests(unittest.TestCase):
             self.assertEqual(updated["results"]["B"]["research_eligibility"]["completeness"]["missing_bars"], 1)
             self.assertTrue(Path(report["manifest_updated"]).exists())
 
+    def cas_session(self, date="2026-01-05"):
+        continuous = pd.date_range(f"{date} 09:15", f"{date} 15:10", freq="5min", tz="Asia/Kolkata")
+        post = pd.date_range(f"{date} 15:15", periods=3, freq="5min", tz="Asia/Kolkata")
+        ts = continuous.append(post)
+        return pd.DataFrame({"timestamp": ts, "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000})
+
+    def test_cas_session_excludes_auction_rows_and_uses_72_continuous_bars(self):
+        report = audit_intraday_completeness(self.cas_session(), 5, session_end="15:15", as_of="2026-01-05 16:00+05:30")
+        self.assertTrue(report["eligible"])
+        self.assertEqual(report["expected_bars_on_observed_dates"], 72)
+        self.assertEqual(report["missing_bars"], 0)
+        self.assertEqual(report["post_session_observations_excluded"], 3)
+        self.assertEqual(report["per_date"]["2026-01-05"]["post_session_bars_excluded"], 3)
+
+    def test_cross_symbol_sync_ignores_post_session_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            a = self.cas_session()
+            b = a.iloc[:72].reset_index(drop=True)
+            a.to_csv(Path(tmp, "A.csv"), index=False)
+            b.to_csv(Path(tmp, "B.csv"), index=False)
+            report = audit_research_directory(tmp, 5, "A", session_end="15:15", as_of="2026-01-05 16:00+05:30")
+            self.assertTrue(report["eligible"])
+            self.assertEqual(report["synchronization"]["B"]["missing_reference_timestamps"], 0)
+            self.assertEqual(report["synchronization"]["B"]["extra_timestamps_vs_reference"], 0)
+
+
     def test_empty_directory_is_ineligible(self):
         with tempfile.TemporaryDirectory() as tmp:
             report = audit_research_directory(tmp, as_of="2026-01-05 16:00+05:30")
