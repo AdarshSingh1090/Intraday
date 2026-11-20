@@ -29,10 +29,12 @@ def _trend_strength(row):
 
 
 def _direction_for_row(row, allow_short=True):
-    close, e20, e50, slope = row["close"], row["ema_20"], row["ema_50"], row["ema_20_slope_percent"]
-    if close > e20 > e50 and slope > 0:
+    # Diagnostic orientation is based on EMA20 slope only. EMA alignment is
+    # then measured as an independent filter rather than pre-filtering the sample.
+    slope = row["ema_20_slope_percent"]
+    if slope > 0:
         return "LONG"
-    if allow_short and close < e20 < e50 and slope < 0:
+    if allow_short and slope < 0:
         return "SHORT"
     return None
 
@@ -98,15 +100,17 @@ def diagnose_symbol(frame, symbol, config=None):
             continue
         flags = _filter_flags(row, direction, config)
         flags.update({"direction": direction, "timestamp": row["timestamp"], "symbol": symbol})
-        flags["score"] = sum(bool(flags[f]) for f in FILTERS)
-        flags["baseline_strategy_pass"] = bool(flags["rsi"] and flags["relative_volume"] and flags["score"] >= config.minimum_score)
+        # The strategy's score is six checks; trend strength is an upstream gate.
+        score_filters = ["ema_alignment", "rsi", "momentum", "relative_volume", "ema_extension", "candle_confirmation"]
+        flags["score"] = sum(bool(flags[f]) for f in score_filters)
+        flags["baseline_strategy_pass"] = bool(flags["trend_strength"] and flags["rsi"] and flags["relative_volume"] and flags["score"] >= config.minimum_score)
         rows.append(flags)
 
     observations = pd.DataFrame(rows)
     if observations.empty:
         summary = {name: {"tested": 0, "passed": 0, "failed": 0, "pass_rate_pct": None} for name in FILTERS}
         scenarios = {name: {"required_filters": list(req), "passing_observations": 0, "pass_rate_pct": None} for name, req in _scenario_masks().items()}
-        scenarios["strategy_baseline_hard_filters_plus_minimum_score"] = {"required_filters": ["rsi", "relative_volume", f"score>={config.minimum_score}"], "passing_observations": 0, "pass_rate_pct": None}
+        scenarios["strategy_baseline_hard_filters_plus_minimum_score"] = {"required_filters": ["trend_strength", "rsi", "relative_volume", f"score>={config.minimum_score}"], "passing_observations": 0, "pass_rate_pct": None}
         return {"symbol": symbol, "rows": len(data), "valid_indicator_rows": valid_indicator_rows, "directional_observations": 0, "filter_summary": summary, "scenarios": scenarios, "diagnostic_rows": []}
 
     total = len(observations)
@@ -121,7 +125,7 @@ def diagnose_symbol(frame, symbol, config=None):
         scenarios[name] = {"required_filters": list(required_filters), "passing_observations": count, "pass_rate_pct": round(100*count/total, 2)}
     baseline_count = int(observations["baseline_strategy_pass"].sum())
     scenarios["strategy_baseline_hard_filters_plus_minimum_score"] = {
-        "required_filters": ["rsi", "relative_volume", f"score>={config.minimum_score}"],
+        "required_filters": ["trend_strength", "rsi", "relative_volume", f"score>={config.minimum_score}"],
         "passing_observations": baseline_count, "pass_rate_pct": round(100*baseline_count/total, 2),
     }
     bottlenecks = sorted(FILTERS, key=lambda f: (summary[f]["pass_rate_pct"], f))
