@@ -23,6 +23,7 @@ from market_intelligence.paper_simulator import simulate_candidate, SimulationCo
 import json
 from market_intelligence.backtester import backtest, BacktestConfig
 from market_intelligence.experiment import run_chronological_experiment
+from market_intelligence.research_data import ResearchFetchConfig, fetch_multi_symbol_research_data
 
 
 # =========================================================
@@ -232,6 +233,43 @@ def cmd_yahoo_history(args):
         df,
         "yahoo_finance_history"
     )
+
+
+# =========================================================
+# STAGE 8: MULTI-SYMBOL RESEARCH DATA
+# =========================================================
+
+def cmd_fetch_research_data(args):
+    symbols = [item.strip().upper() for item in args.symbols.split(",") if item.strip()]
+    report = fetch_multi_symbol_research_data(
+        symbols,
+        ResearchFetchConfig(
+            interval_minutes=args.interval,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            market_timezone=args.market_timezone,
+        ),
+        args.output_dir,
+    )
+    print("\\nSTAGE 8 HISTORICAL DATA FETCH")
+    print("=" * 60)
+    for symbol, result in report["results"].items():
+        print(f"{symbol}: {result['status']}")
+        if result.get("file"):
+            audit = result["audit"]
+            print(f"  rows={audit['rows']} coverage={audit.get('coverage', {})}")
+        if result.get("error"):
+            print(f"  error: {result['error']}")
+        if result.get("audit", {}).get("issues"):
+            for issue in result["audit"]["issues"]:
+                print(f"  audit: {issue}")
+    print(f"Manifest: {report['manifest_file']}")
+    print(f"Saved: {len(report['successful_symbols'])}/{len(symbols)} symbols")
+    print("Research-only | No broker execution")
+    if not report["successful_symbols"]:
+        raise SystemExit(2)
+    if report["failed_or_rejected_symbols"]:
+        raise SystemExit(1)
 
 
 # =========================================================
@@ -830,6 +868,20 @@ def build_parser():
     yhist.set_defaults(
         func=cmd_yahoo_history
     )
+
+    # -----------------------------------------------------
+    # STAGE 8: MULTI-SYMBOL HISTORICAL RESEARCH DATA
+    # -----------------------------------------------------
+
+    research_data = sub.add_parser("fetch-research-data")
+    research_data.add_argument("--symbols", required=True,
+                               help="Comma-separated Yahoo tickers, e.g. RELIANCE.NS,TCS.NS")
+    research_data.add_argument("--interval", type=int, choices=[1, 2, 5, 15, 30, 60], default=5)
+    research_data.add_argument("--start-date", required=True, help="Inclusive date (YYYY-MM-DD)")
+    research_data.add_argument("--end-date", required=True, help="Provider end-exclusive date (YYYY-MM-DD)")
+    research_data.add_argument("--output-dir", default="data/research")
+    research_data.add_argument("--market-timezone", default="Asia/Kolkata")
+    research_data.set_defaults(func=cmd_fetch_research_data)
 
     # -----------------------------------------------------
     # CSV IMPORT
