@@ -17,6 +17,17 @@ class Stage8CliTests(unittest.TestCase):
         self.assertEqual(args.reference, "RELIANCE.NS_5m")
         self.assertEqual(args.func.__name__, "cmd_audit_research_data")
 
+    def test_strategy_diagnostics_parser(self):
+        args = build_parser().parse_args([
+            "strategy-diagnostics",
+            "--directory", "data/research",
+            "--report-json", "reports/diagnostics.json",
+        ])
+        self.assertEqual(args.cmd, "strategy-diagnostics")
+        self.assertEqual(args.directory, "data/research")
+        self.assertEqual(args.report_json, "reports/diagnostics.json")
+        self.assertEqual(args.func.__name__, "cmd_strategy_diagnostics")
+
     def test_fetch_research_data_parser(self):
         args = build_parser().parse_args([
             "fetch-research-data",
