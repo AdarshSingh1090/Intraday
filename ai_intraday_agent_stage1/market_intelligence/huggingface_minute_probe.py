@@ -18,6 +18,18 @@ TIMEZONE = "Asia/Kolkata"
 DATASET_ID = "xxparthparekhxx/indian-stock-market-minute-data"
 FILTER_URL = "https://datasets-server.huggingface.co/filter"
 OHLCV = ["timestamp", "open", "high", "low", "close", "volume"]
+RETRYABLE_HTTP = {429, 500, 502, 503, 504}
+MAX_FILTER_RETRIES = 1
+
+
+class DatasetViewerHTTPError(RuntimeError):
+    def __init__(self, status_code, body, attempts):
+        self.status_code = status_code
+        self.body = body
+        self.attempts = attempts
+        self.index_loading = status_code == 500 and "dataset index is loading" in body.lower()
+        super().__init__(f"Hugging Face filter HTTP {status_code} after {attempts} attempt(s): {body[:500]}")
+
 
 
 def _read_dataset(path):
@@ -94,7 +106,7 @@ def _compare_aggregated_to_yahoo(minute_frame, original_frame, day, start, end):
     }
 
 
-def fetch_public_minute_window(session, symbol, start, end, timeout=45):
+def fetch_public_minute_window(session, symbol, start, end, timeout=45, max_retries=MAX_FILTER_RETRIES, retry_delay=2, sleep_func=time.sleep):
     """Query the dataset viewer filter API for a narrow symbol/time window."""
     start_utc = pd.Timestamp(start).tz_convert("UTC")
     end_utc = pd.Timestamp(end).tz_convert("UTC")
@@ -111,8 +123,28 @@ def fetch_public_minute_window(session, symbol, start, end, timeout=45):
         "offset": 0,
         "length": 100,
     }
-    response = session.get(FILTER_URL, params=params, headers={"Accept": "application/json"}, timeout=timeout)
-    response.raise_for_status()
+    response = None
+    retry_statuses = []
+    attempts = 0
+    for attempt in range(max_retries + 1):
+        attempts = attempt + 1
+        response = session.get(
+            FILTER_URL, params=params, headers={"Accept": "application/json"}, timeout=timeout
+        )
+        status_code = int(getattr(response, "status_code", 200))
+        if status_code in RETRYABLE_HTTP and attempt < max_retries:
+            retry_statuses.append(status_code)
+            retry_after = getattr(response, "headers", {}).get("Retry-After")
+            try:
+                delay = min(5.0, max(0.0, float(retry_after)))
+            except (TypeError, ValueError):
+                delay = min(5.0, retry_delay * (2 ** attempt))
+            sleep_func(delay)
+            continue
+        if status_code >= 400:
+            body = getattr(response, "text", "") or ""
+            raise DatasetViewerHTTPError(status_code, body, attempts)
+        break
     payload = response.json()
     rows = []
     for item in payload.get("rows", []):
@@ -137,7 +169,9 @@ def fetch_public_minute_window(session, symbol, start, end, timeout=45):
         "num_rows_returned": len(frame),
         "dataset": payload.get("dataset", DATASET_ID),
         "config": payload.get("config", "default"),
-        "split": payload.get("split", "minute"),
+        "split": payload.get("split", "train"),
+        "request_attempts": attempts,
+        "retry_statuses": retry_statuses,
     }
 
 
@@ -148,6 +182,7 @@ def probe_public_minute_dataset(directory, symbols, output, session_start="09:15
     session = session or requests.Session()
     directory = Path(directory)
     reports = {}
+    viewer_index_loading_circuit_breaker = False
     for symbol in symbols:
         path = directory / f"{symbol}_5m.csv"
         if not path.exists():
@@ -171,55 +206,75 @@ def probe_public_minute_dataset(directory, symbols, output, session_start="09:15
                 day = pd.Timestamp(day_text).date()
                 start = min(missing) - pd.Timedelta(minutes=5)
                 end = max(missing) + pd.Timedelta(minutes=10)
-                request_report = {"status": "NOT_RUN"}
-                try:
-                    result = fetch_public_minute_window(
-                        session, symbol.upper().removesuffix(".NS"), start, end
-                    )
-                    frame = result["frame"]
-                    partial = result["partial"]
-                    status = "OK" if not frame.empty else "EMPTY"
-                    raw_candidates = {
-                        str(stamp): aggregate_exact_5m_from_minute(frame, stamp)
-                        for stamp in missing
-                    }
-                    raw_candidate_count = sum(v is not None for v in raw_candidates.values())
-                    if partial is False:
-                        candidates = raw_candidates
-                        candidate_status = "CANDIDATES_AVAILABLE" if raw_candidate_count else "NO_COMPLETE_WINDOW"
-                    else:
-                        candidates = {stamp: None for stamp in raw_candidates}
-                        if raw_candidate_count:
-                            candidate_status = (
-                                "WITHHELD_PARTIAL_INDEX" if partial is True
-                                else "WITHHELD_INDEX_COMPLETENESS_UNKNOWN"
-                            )
-                        else:
-                            candidate_status = "NO_COMPLETE_WINDOW"
-                    neighbor_validation = _compare_aggregated_to_yahoo(
-                        frame, original, day, start, end
-                    )
+                if viewer_index_loading_circuit_breaker:
                     request_report = {
-                        "status": status,
-                        "partial_index": partial,
-                        "num_rows_total": result["num_rows_total"],
-                        "num_rows_returned": result["num_rows_returned"],
-                        "window_start_ist": str(start),
-                        "window_end_exclusive_ist": str(end),
-                        "raw_complete_candidate_count": raw_candidate_count,
-                        "candidate_status": candidate_status,
-                        "reconstructed_5m_candidates": candidates,
-                        "neighbor_validation_against_yahoo_5m": neighbor_validation,
-                        "dataset": result["dataset"],
-                        "config": result["config"],
-                        "split": result["split"],
-                    }
-                except Exception as exc:
-                    request_report = {
-                        "status": "ERROR",
-                        "error": f"{type(exc).__name__}: {exc}",
+                        "status": "SKIPPED_INDEX_LOADING",
+                        "error": "Dataset Viewer reported that its dataset index is loading; circuit breaker avoids redundant requests.",
                         "reconstructed_5m_candidates": {str(stamp): None for stamp in missing},
                     }
+                else:
+                    try:
+                        result = fetch_public_minute_window(
+                            session, symbol.upper().removesuffix(".NS"), start, end
+                        )
+                        frame = result["frame"]
+                        partial = result["partial"]
+                        status = "OK" if not frame.empty else "EMPTY"
+                        raw_candidates = {
+                            str(stamp): aggregate_exact_5m_from_minute(frame, stamp)
+                            for stamp in missing
+                        }
+                        raw_candidate_count = sum(v is not None for v in raw_candidates.values())
+                        if partial is False:
+                            candidates = raw_candidates
+                            candidate_status = "CANDIDATES_AVAILABLE" if raw_candidate_count else "NO_COMPLETE_WINDOW"
+                        else:
+                            candidates = {stamp: None for stamp in raw_candidates}
+                            if raw_candidate_count:
+                                candidate_status = (
+                                    "WITHHELD_PARTIAL_INDEX" if partial is True
+                                    else "WITHHELD_INDEX_COMPLETENESS_UNKNOWN"
+                                )
+                            else:
+                                candidate_status = "NO_COMPLETE_WINDOW"
+                        neighbor_validation = _compare_aggregated_to_yahoo(
+                            frame, original, day, start, end
+                        )
+                        request_report = {
+                            "status": status,
+                            "request_attempts": result["request_attempts"],
+                            "retry_statuses": result["retry_statuses"],
+                            "partial_index": partial,
+                            "num_rows_total": result["num_rows_total"],
+                            "num_rows_returned": result["num_rows_returned"],
+                            "window_start_ist": str(start),
+                            "window_end_exclusive_ist": str(end),
+                            "raw_complete_candidate_count": raw_candidate_count,
+                            "candidate_status": candidate_status,
+                            "reconstructed_5m_candidates": candidates,
+                            "neighbor_validation_against_yahoo_5m": neighbor_validation,
+                            "dataset": result["dataset"],
+                            "config": result["config"],
+                            "split": result["split"],
+                        }
+                    except DatasetViewerHTTPError as exc:
+                        if exc.index_loading:
+                            viewer_index_loading_circuit_breaker = True
+                        request_report = {
+                            "status": "ERROR",
+                            "http_status": exc.status_code,
+                            "request_attempts": exc.attempts,
+                            "index_loading_error": exc.index_loading,
+                            "error": str(exc),
+                            "error_body_excerpt": exc.body[:500],
+                            "reconstructed_5m_candidates": {str(stamp): None for stamp in missing},
+                        }
+                    except Exception as exc:
+                        request_report = {
+                            "status": "ERROR",
+                            "error": f"{type(exc).__name__}: {exc}",
+                            "reconstructed_5m_candidates": {str(stamp): None for stamp in missing},
+                        }
                 day_reports[day_text] = {
                     "missing_timestamps_in_original": [str(stamp) for stamp in missing],
                     "public_dataset_query": request_report,
@@ -256,13 +311,15 @@ def probe_public_minute_dataset(directory, symbols, output, session_start="09:15
         "datasets_modified": False,
         "interpretation": (
             "Exact 5m candidates require five consecutive 1m bars and a complete (partial=false) dataset-viewer index. "
-            "Candidates are only reported; no CSVs are modified. Neighbor bars are compared to Yahoo when possible."
+            "Transient HTTP 429/5xx responses are retried once; if the viewer reports its index is loading, a circuit breaker "
+            "skips redundant symbol queries. Candidates are only reported; no CSVs are modified. Neighbor bars are compared to Yahoo when possible."
         ),
         "summary": {
             "symbols_with_gaps": sum(r.get("missing_count_original", 0) > 0 for r in reports.values()),
             "missing_5m_timestamps_probed": total_missing,
             "exact_5m_candidates_found": total_candidates,
             "successful_public_queries": total_successful,
+            "dataset_index_loading_circuit_breaker_triggered": viewer_index_loading_circuit_breaker,
         },
         "session": {"start": session_start, "end_exclusive": session_end},
         "reports": reports,
@@ -271,7 +328,6 @@ def probe_public_minute_dataset(directory, symbols, output, session_start="09:15
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
     return result
-
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)

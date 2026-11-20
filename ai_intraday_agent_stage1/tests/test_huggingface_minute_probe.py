@@ -14,10 +14,14 @@ from market_intelligence.huggingface_minute_probe import (
 
 
 class FakeResponse:
-    def __init__(self, payload):
+    def __init__(self, payload, status_code=200, text=None, headers=None):
         self.payload = payload
+        self.status_code = status_code
+        self.text = text if text is not None else str(payload)
+        self.headers = headers or {}
     def raise_for_status(self):
-        pass
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
     def json(self):
         return self.payload
 
@@ -116,6 +120,70 @@ class HuggingFaceMinuteProbeTests(unittest.TestCase):
             self.assertEqual(report["summary"]["exact_5m_candidates_found"], 0)
             self.assertFalse(report["datasets_modified"])
             self.assertEqual(len(pd.read_csv(source)), len(original))
+
+    def test_filter_retries_transient_500_and_reports_attempts(self):
+        payload = {"rows": [{"row": {"timestamp": "2026-10-15T06:15:00Z",
+            "open": 100, "high": 101, "low": 99, "close": 100.5, "volume": 10}}],
+            "partial": False, "num_rows_total": 1}
+        session = Mock()
+        session.get.side_effect = [
+            FakeResponse({"error": "dataset index is loading"}, 500,
+                         text="dataset index is loading"),
+            FakeResponse(payload, 200),
+        ]
+        sleeper = Mock()
+        start = pd.Timestamp("2026-10-15 11:45:00+05:30")
+        result = fetch_public_minute_window(
+            session, "RELIANCE", start, start + pd.Timedelta(minutes=5),
+            sleep_func=sleeper,
+        )
+        self.assertEqual(result["request_attempts"], 2)
+        self.assertEqual(result["retry_statuses"], [500])
+        self.assertEqual(len(result["frame"]), 1)
+        self.assertEqual(session.get.call_count, 2)
+        sleeper.assert_called_once_with(2)
+
+    def test_terminal_404_is_not_retried(self):
+        session = Mock()
+        session.get.return_value = FakeResponse({"error": "not found"}, 404, text="not found")
+        start = pd.Timestamp("2026-10-15 11:45:00+05:30")
+        with self.assertRaises(Exception) as raised:
+            fetch_public_minute_window(
+                session, "RELIANCE", start, start + pd.Timedelta(minutes=5),
+                sleep_func=Mock(),
+            )
+        self.assertEqual(getattr(raised.exception, "status_code", None), 404)
+        self.assertEqual(session.get.call_count, 1)
+
+    def test_index_loading_circuit_breaker_skips_redundant_symbol_queries(self):
+        day = pd.Timestamp("2026-10-15").date()
+        grid = expected_5m_grid(day)
+        original = pd.DataFrame({
+            "timestamp": grid.delete([30, 31]).astype(str), "open": 100, "high": 101,
+            "low": 99, "close": 100.5, "volume": 2000
+        })
+        session = Mock()
+        session.get.side_effect = [
+            FakeResponse({"error": "the dataset index is loading"}, 500,
+                         text="the dataset index is loading"),
+            FakeResponse({"error": "the dataset index is loading"}, 500,
+                         text="the dataset index is loading"),
+        ]
+        with tempfile.TemporaryDirectory() as temp:
+            for symbol in ["RELIANCE.NS", "TCS.NS"]:
+                original.to_csv(Path(temp) / f"{symbol}_5m.csv", index=False)
+            report = probe_public_minute_dataset(
+                temp, ["RELIANCE.NS", "TCS.NS"], Path(temp)/"report.json",
+                session=session,
+            )
+            first = report["reports"]["RELIANCE.NS"]["missing_by_day"]["2026-10-15"]["public_dataset_query"]
+            second = report["reports"]["TCS.NS"]["missing_by_day"]["2026-10-15"]["public_dataset_query"]
+            self.assertEqual(first["http_status"], 500)
+            self.assertTrue(first["index_loading_error"])
+            self.assertEqual(first["request_attempts"], 2)
+            self.assertEqual(second["status"], "SKIPPED_INDEX_LOADING")
+            self.assertEqual(session.get.call_count, 2)
+            self.assertTrue(report["summary"]["dataset_index_loading_circuit_breaker_triggered"])
 
     def test_provider_error_is_inconclusive_and_source_unchanged(self):
         day = pd.Timestamp("2026-10-15").date()
