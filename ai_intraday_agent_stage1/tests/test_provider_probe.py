@@ -1,6 +1,9 @@
+import sys
+from types import SimpleNamespace
+
 import pandas as pd
 
-from market_intelligence.provider_probe import compare_frames, expected_session_grid, summarize_provider_frame
+from market_intelligence.provider_probe import compare_frames, expected_session_grid, run_probe, summarize_provider_frame
 
 
 def frame(times):
@@ -36,3 +39,22 @@ def test_provider_comparison_reports_timestamp_disagreement():
     assert report["timestamp_comparison"]["primary_only_timestamps"] == 0
     assert report["timestamp_comparison"]["alternate_only_timestamps"] == 1
     assert report["alternate"]["missing_completed_bars"] == 0
+
+
+def test_probe_report_discloses_same_provider_scope(monkeypatch, tmp_path):
+    grid = expected_session_grid(pd.Timestamp("2026-11-19").date())
+    fake_yfinance = SimpleNamespace(
+        __version__="test-version",
+        Ticker=lambda symbol: SimpleNamespace(history=lambda **kwargs: frame(grid)),
+        download=lambda *args, **kwargs: frame(grid),
+    )
+    monkeypatch.setitem(sys.modules, "yfinance", fake_yfinance)
+
+    output = tmp_path / "probe.json"
+    report = run_probe(["TEST.NS"], "2026-11-19", "2026-11-20", output)
+
+    assert report["yfinance_version"] == "test-version"
+    assert report["independent_provider_comparison"] is False
+    assert "not an independent provider" in report["comparison_scope"]
+    assert "independent market-data provider" in report["interpretation_warning"]
+    assert output.exists()
