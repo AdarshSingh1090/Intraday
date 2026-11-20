@@ -105,8 +105,8 @@ def fetch_public_minute_window(session, symbol, start, end, timeout=45):
     )
     params = {
         "dataset": DATASET_ID,
-        "config": "default",
-        "split": "minute",
+        "config": "minute",
+        "split": "train",
         "where": where,
         "offset": 0,
         "length": 100,

@@ -61,12 +61,13 @@ def _config_split_from_splits(payload):
     entries = payload.get("splits")
     if not isinstance(entries, list):
         return "default", "minute"
+    # HF reports this dataset as two configs (day/minute), each with split=train.
     for entry in entries:
-        if isinstance(entry, dict) and entry.get("split") == "minute":
-            return entry.get("config", "default"), entry["split"]
+        if isinstance(entry, dict) and entry.get("config") == "minute":
+            return entry.get("config", "minute"), entry.get("split", "train")
     if entries and isinstance(entries[0], dict):
-        return entries[0].get("config", "default"), entries[0].get("split", "minute")
-    return "default", "minute"
+        return entries[0].get("config", "default"), entries[0].get("split", "train")
+    return "default", "train"
 
 
 def _summarize_parquet(payload):
@@ -142,7 +143,14 @@ def run_diagnostics(output, session=None, dataset=DATASET_ID):
     report["diagnostics"]["filter_symbol"] = _capture(
         session, "filter-symbol", f"{BASE}/filter",
         {"dataset": dataset, "config": config, "split": split,
-         "where": '"symbol"=\'RELIANCE\'', "offset": 0, "length": 5},
+         "where": '"symbol"=\\'RELIANCE\\'', "offset": 0, "length": 5},
+    )
+    # Bounded target-window query tests the composite predicate used by recovery.
+    report["diagnostics"]["filter_target_window"] = _capture(
+        session, "filter-target-window", f"{BASE}/filter",
+        {"dataset": dataset, "config": "minute", "split": "train",
+         "where": '"symbol"=\\'RELIANCE\\' AND "timestamp">=\\'2026-10-15T06:10:00Z\\' AND "timestamp"<\\'2026-10-15T06:30:00Z\\'",
+         "offset": 0, "length": 100},
     )
 
     report["parquet_manifest_summary"] = _summarize_parquet(report["diagnostics"]["parquet"].get("json"))
@@ -150,7 +158,7 @@ def run_diagnostics(output, session=None, dataset=DATASET_ID):
         session, "hub-metadata", f"{HUB}/api/datasets/{dataset}",
     )
     # Metadata-only tree call for converted Parquet split; no file content.
-    tree_url = f"{HUB}/api/datasets/{dataset}/tree/refs%2Fconvert%2Fparquet/default/minute"
+    tree_url = f"{HUB}/api/datasets/{dataset}/tree/refs%2Fconvert%2Fparquet/minute/train"
     report["diagnostics"]["hub_parquet_tree"] = _capture(
         session, "hub-parquet-tree", tree_url, {"recursive": "true", "expand": "true"},
     )
@@ -161,9 +169,12 @@ def run_diagnostics(output, session=None, dataset=DATASET_ID):
         report["viewer_capabilities"] = is_valid
     filter_result = report["diagnostics"]["filter_symbol"]
     report["filter_outcome"] = {
-        "status_code": filter_result.get("status_code"),
-        "ok": filter_result.get("ok"),
-        "error_excerpt": filter_result.get("body_excerpt") if not filter_result.get("ok") else None,
+        "symbol_query_status": filter_result.get("status_code"),
+        "symbol_query_ok": filter_result.get("ok"),
+        "symbol_query_error_excerpt": filter_result.get("body_excerpt") if not filter_result.get("ok") else None,
+        "target_window_status": report["diagnostics"]["filter_target_window"].get("status_code"),
+        "target_window_ok": report["diagnostics"]["filter_target_window"].get("ok"),
+        "target_window_error_excerpt": report["diagnostics"]["filter_target_window"].get("body_excerpt") if not report["diagnostics"]["filter_target_window"].get("ok") else None,
         "viewer_filter_capability": is_valid.get("filter") if isinstance(is_valid, dict) else None,
     }
     output = Path(output)

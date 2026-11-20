@@ -25,10 +25,10 @@ class Response:
 class HuggingFaceApiDiagnosticsTests(unittest.TestCase):
     def test_selects_minute_split_from_metadata(self):
         self.assertEqual(_config_split_from_splits({"splits":[
-            {"config":"default","split":"day"},
-            {"config":"default","split":"minute"}
-        ]}), ("default","minute"))
-        self.assertEqual(_config_split_from_splits({}), ("default","minute"))
+            {"config":"day","split":"train"},
+            {"config":"minute","split":"train"}
+        ]}), ("minute","train"))
+        self.assertEqual(_config_split_from_splits({}), ("default","train"))
 
     def test_summarizes_parquet_files_without_downloading(self):
         result = _summarize_parquet({"parquet_files":[
@@ -43,7 +43,7 @@ class HuggingFaceApiDiagnosticsTests(unittest.TestCase):
         session=Mock()
         def get(url,params=None,**kwargs):
             if url.endswith("/splits"):
-                return Response(200,{"splits":[{"config":"default","split":"minute"}]},url)
+                return Response(200,{"splits":[{"config":"minute","split":"train"}]},url)
             if url.endswith("/is-valid"):
                 return Response(200,{"viewer":True,"filter":False},url)
             if url.endswith("/parquet"):
@@ -58,12 +58,20 @@ class HuggingFaceApiDiagnosticsTests(unittest.TestCase):
         session.get.side_effect=get
         with tempfile.TemporaryDirectory() as d:
             report=run_diagnostics(Path(d)/"report.json",session=session,dataset="owner/name")
-            self.assertEqual(report["filter_outcome"]["status_code"],404)
-            self.assertIn("filter route unavailable",report["filter_outcome"]["error_excerpt"])
+            self.assertEqual(report["filter_outcome"]["symbol_query_status"],404)
+            self.assertIn("filter route unavailable",report["filter_outcome"]["symbol_query_error_excerpt"])
+            self.assertEqual(report["filter_outcome"]["target_window_status"],404)
+            self.assertIn("filter route unavailable",report["filter_outcome"]["target_window_error_excerpt"])
             self.assertFalse(report["download_attempted"])
             self.assertEqual(report["hub_parquet_tree_summary"]["entry_count"],1)
+            filter_calls=[call for call in session.get.call_args_list if call.args[0].endswith("/filter")]
+            self.assertEqual(len(filter_calls),2)
+            target_params=filter_calls[1].kwargs["params"]
+            self.assertEqual(target_params["config"],"minute")
+            self.assertEqual(target_params["split"],"train")
+            self.assertIn("timestamp",target_params["where"])
             self.assertTrue(Path(d,"report.json").exists())
-        self.assertEqual(session.get.call_count,8)
+        self.assertEqual(session.get.call_count,9)
 
     def test_network_error_is_recorded_not_raised(self):
         session=Mock()

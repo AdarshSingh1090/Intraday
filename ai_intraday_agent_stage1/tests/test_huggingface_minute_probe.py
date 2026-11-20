@@ -38,6 +38,8 @@ class HuggingFaceMinuteProbeTests(unittest.TestCase):
         params = session.get.call_args.kwargs["params"]
         self.assertIn('"symbol"=\'RELIANCE\'', params["where"])
         self.assertIn('"timestamp">=', params["where"])
+        self.assertEqual(params["config"], "minute")
+        self.assertEqual(params["split"], "train")
         self.assertEqual(params["length"], 100)
 
     def test_aggregates_only_complete_exact_5m_window(self):
