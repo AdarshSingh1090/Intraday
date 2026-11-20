@@ -113,16 +113,16 @@ jobs:
           Path("reports").mkdir(exist_ok=True)
           Path("reports/research_gate.json").write_text(json.dumps(gate, indent=2), encoding="utf-8")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"eligible={str(eligible).lower()}\\n")
+              output.write(f"eligible={str(eligible).lower()}\n")
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
-              summary.write("## Chronological experiment eligibility\\n\\n")
-              summary.write(f"**Status:** {gate['status']}\\n\\n")
+              summary.write("## Chronological experiment eligibility\n\n")
+              summary.write(f"**Status:** {gate['status']}\n\n")
               if eligible:
-                  summary.write("Completeness and cross-symbol synchronization passed. Experiments may run.\\n")
+                  summary.write("Completeness and cross-symbol synchronization passed. Experiments may run.\n")
               else:
-                  summary.write("Experiments are skipped because data completeness/synchronization failed. No gaps are filled.\\n\\n")
+                  summary.write("Experiments are skipped because data completeness/synchronization failed. No gaps are filled.\n\n")
                   for issue in gate["issues"]:
-                      summary.write(f"- {issue}\\n")
+                      summary.write(f"- {issue}\n")
           print(f"Research eligibility: {gate['status']}")
           PY
       - name: Run chronological experiments and cost stress tests
