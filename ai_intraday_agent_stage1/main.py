@@ -251,7 +251,7 @@ def cmd_fetch_research_data(args):
         ),
         args.output_dir,
     )
-    print("\\nSTAGE 8 HISTORICAL DATA FETCH")
+    print("\nSTAGE 8 HISTORICAL DATA FETCH")
     print("=" * 60)
     for symbol, result in report["results"].items():
         print(f"{symbol}: {result['status']}")
