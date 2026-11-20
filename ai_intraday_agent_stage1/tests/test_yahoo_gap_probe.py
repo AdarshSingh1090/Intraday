@@ -85,6 +85,7 @@ class YahooGapProbeTests(unittest.TestCase):
             item=report["reports"]["RELIANCE.NS"]
             self.assertEqual(item["missing_candles_found"],1)
             self.assertEqual(item["missing_by_day"]["2026-10-15"]["candidates"][str(missing)]["close"],100.5)
+            self.assertEqual(report["connectivity_sanity"]["status"], "OK")
             self.assertFalse(report["datasets_modified"])
             self.assertEqual(len(pd.read_csv(path)),len(original))
 

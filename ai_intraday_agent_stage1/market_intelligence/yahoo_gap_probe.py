@@ -359,6 +359,28 @@ def probe_openchart_missing_bars(directory, symbols, output, session_start="09:1
         except Exception as exc:
             reports[symbol] = {"status": "ERROR", "error": f"{type(exc).__name__}: {exc}"}
 
+    connectivity_sanity = {"status": "NOT_RUN"}
+    try:
+        sanity_symbol = next((s for s in symbols if (directory / f"{s}_5m.csv").exists()), None)
+        if sanity_symbol:
+            sanity_original = _read_dataset(directory / f"{sanity_symbol}_5m.csv")
+            sanity_day = max(sanity_original.timestamp.dt.date)
+            sanity_start = datetime.combine(sanity_day, time.fromisoformat(session_start), tzinfo=tz)
+            sanity_end = datetime.combine(sanity_day, time.fromisoformat(session_end), tzinfo=tz)
+            sanity_frame = client.historical(
+                symbol=sanity_symbol.upper().removesuffix(".NS"), segment="EQ",
+                start=sanity_start, end=sanity_end, interval="5m"
+            )
+            connectivity_sanity = {
+                "status": "OK" if sanity_frame is not None and not sanity_frame.empty else "EMPTY",
+                "symbol": sanity_symbol,
+                "date": str(sanity_day),
+                "rows_returned": int(len(sanity_frame)) if sanity_frame is not None else 0,
+                "purpose": "verify NSE/OpenChart can return recent intraday data; does not validate older gap date",
+            }
+    except Exception as exc:
+        connectivity_sanity = {"status": "ERROR", "error": f"{type(exc).__name__}: {exc}"}
+
     result = {
         "purpose": "free-source comparison of Yahoo gaps against NSE Chart API via OpenChart",
         "provider": "NSE Chart API via OpenChart (unofficial wrapper)",
@@ -367,6 +389,7 @@ def probe_openchart_missing_bars(directory, symbols, output, session_start="09:1
         "datasets_modified": False,
         "interpretation": "NSE-source candidate candles are reported only; no CSVs are modified. Timestamp interpretation is selected by overlap with original Yahoo timestamps and reported.",
         "session": {"start": session_start, "end_exclusive": session_end},
+        "connectivity_sanity": connectivity_sanity,
         "reports": reports,
     }
     output = Path(output)
