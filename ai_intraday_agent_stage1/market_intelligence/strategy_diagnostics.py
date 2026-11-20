@@ -83,6 +83,8 @@ def diagnose_symbol(frame, symbol, config=None):
     indicators = calculate_indicators(data)
     screening = calculate_screening_metrics(indicators)
     enriched = screening.get("data", indicators).copy()
+    # Reproduce the regime module's five-bar EMA20 slope calculation causally.
+    enriched["ema_20_slope_percent"] = ((enriched["ema_20"] - enriched["ema_20"].shift(5)) / enriched["ema_20"].shift(5)) * 100
     enriched["trend_strength"] = enriched.apply(_trend_strength, axis=1)
 
     rows = []
