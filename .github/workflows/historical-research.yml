@@ -57,6 +57,17 @@ jobs:
             --start "${{ steps.dates.outputs.start }}" \
             --end "${{ steps.dates.outputs.end }}" \
             --output reports/yahoo_provider_probe.json
+      - name: Compare Yahoo against independent Upstox source (optional token)
+        env:
+          UPSTOX_ACCESS_TOKEN: ${{ secrets.UPSTOX_ACCESS_TOKEN }}
+        run: |
+          python market_intelligence/provider_probe.py \
+            --independent-provider upstox \
+            --symbols RELIANCE.NS,TCS.NS,INFY.NS,HDFCBANK.NS,ICICIBANK.NS \
+            --start "${{ steps.dates.outputs.start }}" \
+            --end "${{ steps.dates.outputs.end }}" \
+            --yahoo-dir data/research \
+            --output reports/independent_provider_probe.json
       - name: Audit dataset completeness
         continue-on-error: true
         run: |
