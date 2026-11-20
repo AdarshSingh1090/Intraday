@@ -87,6 +87,19 @@ class BacktesterTests(unittest.TestCase):
         self.assertEqual(result["benchmarks"]["status"],"COMPLETED")
         self.assertIn("buy_and_hold",result["benchmarks"]["benchmarks"])
 
+    def test_backtest_records_quality_and_setup_rejection_diagnostics(self):
+        data=candles(70)
+        blocked={"trade_eligible":False,"blocking_reasons":["test quality blocker"]}
+        with patch("market_intelligence.backtester.evaluate_market_data", return_value=blocked):
+            result=backtest(data,config=BacktestConfig(warmup_bars=60))
+        self.assertEqual(result["status"],"COMPLETED")
+        diagnostics=result["diagnostics"]
+        self.assertGreater(diagnostics["evaluation_windows"],0)
+        self.assertEqual(diagnostics["quality_blocked_windows"],diagnostics["evaluation_windows"])
+        self.assertEqual(diagnostics["quality_blocking_reason_counts"]["test quality blocker"],diagnostics["evaluation_windows"])
+        self.assertEqual(diagnostics["candidate_setups"],0)
+        self.assertIn("BLOCKED",diagnostics["setup_status_counts"])
+
     def test_walk_forward_uses_only_future_bars_for_fill(self):
         data=candles(65)
         fake_candidate={"symbol":"TEST","direction":"LONG","signal_timestamp":str(data.iloc[60].timestamp.tz_localize("Asia/Kolkata")),
@@ -106,6 +119,8 @@ class BacktesterTests(unittest.TestCase):
             self.assertEqual(pd.to_datetime(forward.iloc[0].timestamp),pd.to_datetime(data.iloc[61].timestamp).tz_localize("Asia/Kolkata"))
         self.assertEqual(result["status"],"COMPLETED")
         self.assertEqual(result["metrics"]["trades"],1)
+        self.assertEqual(result["diagnostics"]["candidate_setups"],1)
+        self.assertEqual(result["diagnostics"]["setup_status_counts"]["CANDIDATE"],1)
         self.assertTrue(result["paper_only"])
 
 
