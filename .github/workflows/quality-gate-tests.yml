@@ -6,6 +6,7 @@ on:
       - stage2-data-quality-investigation
       - stage7-strategy-validation
       - stage8-multi-stock-research
+      - stage9-strategy-diagnostics
   pull_request:
     branches:
       - main
