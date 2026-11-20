@@ -26,8 +26,11 @@ def diagnose_file(path, symbol, interval=5, warmup=60, stride=1):
     no_setup_reasons = Counter()
     insufficient_data_reasons = Counter()
     other_status_reasons = Counter()
+    strategy_filter_pass_counts = Counter()
+    strategy_filter_fail_counts = Counter()
     candidate_timestamps = []
     samples = 0
+    eligible_setup_samples = 0
 
     # Evaluate the same strict data gate as the production research backtester.
     for i in range(max(warmup, 1), len(df), stride):
@@ -55,12 +58,26 @@ def diagnose_file(path, symbol, interval=5, warmup=60, stride=1):
             for reason in setup.get("reasons", []):
                 no_setup_reasons[reason] += 1
             diag = setup.get("diagnostics") or {}
-            for reason in diag.get("failed_checks", []):
-                no_setup_reasons[f"failed check: {reason}"] += 1
+            passed_checks = diag.get("passed_checks", [])
+            failed_checks = diag.get("failed_checks", [])
+            eligible_setup_samples += 1
+            for check in passed_checks:
+                strategy_filter_pass_counts[check] += 1
+            for check in failed_checks:
+                strategy_filter_fail_counts[check] += 1
+                no_setup_reasons[f"failed check: {check}"] += 1
             for reason in diag.get("hard_filter_failures", []):
                 no_setup_reasons[f"hard filter: {reason}"] += 1
         elif setup.get("status") == "CANDIDATE":
             candidate_timestamps.append(str(now))
+            diag = setup.get("diagnostics") or {}
+            passed_checks = setup.get("reasons", [])
+            failed_checks = diag.get("failed_checks", [])
+            eligible_setup_samples += 1
+            for check in passed_checks:
+                strategy_filter_pass_counts[check] += 1
+            for check in failed_checks:
+                strategy_filter_fail_counts[check] += 1
         else:
             for reason in setup.get("reasons", []):
                 other_status_reasons[f"{setup.get('status')}: {reason}"] += 1
@@ -76,6 +93,14 @@ def diagnose_file(path, symbol, interval=5, warmup=60, stride=1):
         "no_setup_reasons": dict(no_setup_reasons.most_common(30)),
         "insufficient_data_reasons": dict(insufficient_data_reasons.most_common(30)),
         "other_status_reasons": dict(other_status_reasons.most_common(30)),
+        "eligible_setup_samples": eligible_setup_samples,
+        "strategy_filter_pass_counts": dict(strategy_filter_pass_counts.most_common()),
+        "strategy_filter_fail_counts": dict(strategy_filter_fail_counts.most_common()),
+        "strategy_filter_pass_rates": {
+            name: round(strategy_filter_pass_counts[name] / (strategy_filter_pass_counts[name] + strategy_filter_fail_counts[name]), 4)
+            for name in sorted(set(strategy_filter_pass_counts) | set(strategy_filter_fail_counts))
+            if strategy_filter_pass_counts[name] + strategy_filter_fail_counts[name] > 0
+        },
         "candidate_timestamps": candidate_timestamps,
         "paper_only": True,
         "execution": "none",
@@ -100,7 +125,8 @@ def main():
     print(json.dumps({k: result[k] for k in (
         "symbol", "rows", "sampled_bars", "status_counts",
         "blocker_counts", "no_setup_reasons", "insufficient_data_reasons",
-        "other_status_reasons", "candidate_timestamps"
+        "other_status_reasons", "strategy_filter_pass_counts",
+        "strategy_filter_fail_counts", "strategy_filter_pass_rates", "candidate_timestamps"
     )}, indent=2))
     print("PAPER ONLY | EXECUTION NONE")
 
