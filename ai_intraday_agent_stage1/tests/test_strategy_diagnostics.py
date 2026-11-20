@@ -57,6 +57,15 @@ class StrategyDiagnosticTests(unittest.TestCase):
             self.assertIn("aggregate", result)
             self.assertIn("TEST.NS", result["symbols"])
 
+    def test_post_session_rows_are_excluded_from_filter_diagnostics(self):
+        frame = make_frame(n=80)
+        result = diagnose_symbol(frame, "TEST", session_end="15:15")
+        self.assertEqual(result["rows"], 80)
+        self.assertEqual(result["continuous_session_rows"], 72)
+        self.assertEqual(result["post_session_rows_excluded"], 8)
+        self.assertEqual(result["session_end"], "15:15")
+
+
     def test_empty_dataset_rejected(self):
         with self.assertRaises(ValueError):
             diagnose_symbol(pd.DataFrame(), "EMPTY")
