@@ -63,7 +63,7 @@ class HuggingFaceApiDiagnosticsTests(unittest.TestCase):
             self.assertFalse(report["download_attempted"])
             self.assertEqual(report["hub_parquet_tree_summary"]["entry_count"],1)
             self.assertTrue(Path(d,"report.json").exists())
-        self.assertEqual(session.get.call_count,7)
+        self.assertEqual(session.get.call_count,8)
 
     def test_network_error_is_recorded_not_raised(self):
         session=Mock()
