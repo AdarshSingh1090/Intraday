@@ -1,0 +1,76 @@
+name: Stage 9 Strategy Signal Diagnostics
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - stage9-strategy-diagnostics
+    paths:
+      - ".github/workflows/stage9-signal-diagnostics.yml"
+      - "ai_intraday_agent_stage1/market_intelligence/**"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install project dependencies
+        working-directory: ai_intraday_agent_stage1
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Set research date window
+        id: dates
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          from datetime import datetime, timedelta
+          from zoneinfo import ZoneInfo
+          today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
+          print(f"start={today - timedelta(days=30)}")
+          print(f"end={today + timedelta(days=1)}")
+          PY
+      - name: Fetch multi-symbol data
+        working-directory: ai_intraday_agent_stage1
+        run: |
+          python main.py fetch-research-data \
+            --symbols RELIANCE.NS,TCS.NS,HDFCBANK.NS,ICICIBANK.NS,INFY.NS \
+            --interval 5 \
+            --start-date "${{ steps.dates.outputs.start }}" \
+            --end-date "${{ steps.dates.outputs.end }}" \
+            --output-dir data/research
+      - name: Run data completeness audit
+        working-directory: ai_intraday_agent_stage1
+        continue-on-error: true
+        run: python main.py audit-research-data --directory data/research --interval 5
+      - name: Diagnose signal frequency and rejection reasons
+        working-directory: ai_intraday_agent_stage1
+        continue-on-error: true
+        run: |
+          mkdir -p data/research/diagnostics
+          for file in data/research/*_5m.csv; do
+            [ -f "$file" ] || continue
+            symbol="$(basename "$file" _5m.csv)"
+            python -m market_intelligence.signal_diagnostics \
+              --file "$file" --symbol "$symbol" --interval 5 \
+              --warmup-bars 60 --stride-bars 1 \
+              --output "data/research/diagnostics/${symbol}_signals.json"
+          done
+      - name: Upload diagnostics artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage9-signal-diagnostics-${{ github.run_number }}
+          path: |
+            ai_intraday_agent_stage1/data/research/*.csv
+            ai_intraday_agent_stage1/data/research/manifest.json
+            ai_intraday_agent_stage1/data/research/completeness_audit.json
+            ai_intraday_agent_stage1/data/research/diagnostics/*.json
+          if-no-files-found: warn
+          retention-days: 7
