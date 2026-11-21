@@ -83,6 +83,16 @@ jobs:
           python -m market_intelligence.huggingface_parquet_range_probe \
             --max-files 11 \
             --output reports/huggingface_parquet_range_probe.json
+      - name: Probe bounded Parquet candidate column chunks (RELIANCE only)
+        continue-on-error: true
+        run: |
+          mkdir -p reports
+          python -m market_intelligence.huggingface_parquet_candidate_probe \
+            --report reports/huggingface_parquet_range_probe.json \
+            --symbol RELIANCE.NS \
+            --max-row-data-bytes 16777216 \
+            --max-column-chunk-bytes 8388608 \
+            --output reports/huggingface_parquet_candidate_probe.json
       - name: Probe public Hugging Face 1-minute dataset for exact recovery candidates
         continue-on-error: true
         run: |
