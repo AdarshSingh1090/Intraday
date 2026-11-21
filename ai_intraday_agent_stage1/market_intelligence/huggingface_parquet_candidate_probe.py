@@ -79,9 +79,9 @@ def _check_candidate_budget(groups, max_total_bytes=MAX_ROW_DATA_BYTES,
             "max_single_column_chunk_bytes": max_chunk_bytes}
 
 
-def _aggregate_minute_rows(frame, target_symbol, window_start, window_end):
+def _target_window_rows(frame, target_symbol, window_start, window_end):
     if frame.empty or "symbol" not in frame or "timestamp" not in frame:
-        return {}
+        return frame.iloc[0:0].copy()
     target = _normalize_symbol(target_symbol)
     frame = frame.copy()
     frame["symbol_norm"] = frame["symbol"].map(_normalize_symbol)
@@ -89,15 +89,13 @@ def _aggregate_minute_rows(frame, target_symbol, window_start, window_end):
     frame = frame[(frame["symbol_norm"] == target) & frame["timestamp"].notna()]
     start = pd.Timestamp(window_start)
     end = pd.Timestamp(window_end)
-    if start.tzinfo is None:
-        start = start.tz_localize("UTC")
-    else:
-        start = start.tz_convert("UTC")
-    if end.tzinfo is None:
-        end = end.tz_localize("UTC")
-    else:
-        end = end.tz_convert("UTC")
-    frame = frame[(frame["timestamp"] >= start) & (frame["timestamp"] < end)]
+    start = start.tz_localize("UTC") if start.tzinfo is None else start.tz_convert("UTC")
+    end = end.tz_localize("UTC") if end.tzinfo is None else end.tz_convert("UTC")
+    return frame[(frame["timestamp"] >= start) & (frame["timestamp"] < end)]
+
+
+def _aggregate_minute_rows(frame, target_symbol, window_start, window_end):
+    frame = _target_window_rows(frame, target_symbol, window_start, window_end)
     if frame.empty:
         return {}
     frame["bucket"] = frame["timestamp"].dt.floor("5min")
@@ -168,11 +166,19 @@ def _compare_yahoo_neighbors(source_bars, yahoo_csv, target_symbol):
 
 def _write_sparse_parquet(path, file_size, footer_bytes, footer_length, chunks):
     footer_start = file_size - 8 - footer_length
+    if footer_length <= 0 or len(footer_bytes) != footer_length + 8:
+        raise ValueError("Footer byte length does not match expected metadata plus trailer")
+    if footer_bytes[-4:] != b"PAR1" or int.from_bytes(footer_bytes[-8:-4], "little") != footer_length:
+        raise ValueError("Parquet footer trailer is invalid")
+    for chunk in chunks:
+        start = int(chunk["start_offset"])
+        end = start + len(chunk["data"])
+        if start < 4 or end > footer_start:
+            raise ValueError("Selected column chunk overlaps header/footer or exceeds file bounds")
     with open(path, "wb") as handle:
         handle.write(b"PAR1")
         handle.seek(footer_start)
         handle.write(footer_bytes)
-        handle.write(footer_bytes[-8:])
         handle.truncate(file_size)
         for chunk in chunks:
             handle.seek(chunk["start_offset"])
@@ -245,6 +251,7 @@ def probe_candidate_rowgroups(report_path, output, target_symbol="RELIANCE.NS",
                 result["footer_metadata_bytes_read"] += footer["bytes_read"]
             for chunk in group["columns"]:
                 start, end = int(chunk["start_offset"]), int(chunk["end_exclusive"])
+                result["row_data_download_attempted"] = True
                 response = _range_request(session, url, start, end - 1)
                 result["range_requests"].append({"kind": "column_chunk", "filename": group["filename"],
                                                  "row_group_index": group["row_group_index"],
@@ -289,8 +296,10 @@ def probe_candidate_rowgroups(report_path, output, target_symbol="RELIANCE.NS",
                 frame = pd.concat(tables, ignore_index=True)
                 window_start = "2026-10-15T06:10:00+00:00"
                 window_end = "2026-10-15T06:30:00+00:00"
+                target_rows = _target_window_rows(frame, target_symbol, window_start, window_end)
                 source_bars = _aggregate_minute_rows(frame, target_symbol, window_start, window_end)
-                result["source_1m_rows_in_window"] = int(len(frame))
+                result["rowgroup_rows_loaded"] = int(len(frame))
+                result["source_1m_rows_in_window"] = int(len(target_rows))
                 result["source_bars_5m"] = source_bars
                 result["target_bars"] = {
                     bucket: source_bars.get(bucket, {"rows": 0, "complete_five_minutes": False})

@@ -7,7 +7,7 @@ import pandas as pd
 
 from market_intelligence.huggingface_parquet_candidate_probe import (
     _select_candidate_groups, _check_candidate_budget, _aggregate_minute_rows,
-    _compare_yahoo_neighbors, MAX_ROW_DATA_BYTES, MAX_COLUMN_CHUNK_BYTES,
+    _compare_yahoo_neighbors, _write_sparse_parquet, MAX_ROW_DATA_BYTES, MAX_COLUMN_CHUNK_BYTES,
 )
 
 
@@ -71,6 +71,27 @@ class CandidateProbeTests(unittest.TestCase):
             path=Path(tmp)/"yahoo.csv";yahoo.to_csv(path,index=False)
             result=_compare_yahoo_neighbors(source,path,"RELIANCE.NS")
         self.assertEqual(result["matches"],1)
+
+    def test_sparse_parquet_writer_preserves_footer_and_places_chunks(self):
+        footer_len=4
+        footer=b"meta"+footer_len.to_bytes(4,"little")+b"PAR1"
+        chunks=[{"start_offset":20,"data":b"chunk"}]
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/"sparse.parquet"
+            _write_sparse_parquet(path,128,footer,footer_len,chunks)
+            with open(path,"rb") as f:
+                self.assertEqual(f.read(4),b"PAR1")
+                f.seek(20);self.assertEqual(f.read(5),b"chunk")
+                f.seek(128-8-footer_len);self.assertEqual(f.read(12),footer)
+            self.assertEqual(path.stat().st_size,128)
+
+    def test_sparse_writer_rejects_chunk_overlapping_footer(self):
+        footer_len=4
+        footer=b"meta"+footer_len.to_bytes(4,"little")+b"PAR1"
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(ValueError):
+                _write_sparse_parquet(Path(tmp)/"bad.parquet",128,footer,footer_len,
+                                     [{"start_offset":120,"data":b"too late"}])
 
 if __name__=="__main__":
     unittest.main()
