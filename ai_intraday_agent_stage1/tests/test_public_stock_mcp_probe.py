@@ -10,6 +10,27 @@ class PublicStockMCPProbeTests(unittest.TestCase):
         self.assertEqual(args,{"dataset":"stocks","symbol":"RELIANCE","interval":"1minute","start":"2026-10-15","end":"2026-10-15","limit":200,"desc":False})
         self.assertEqual(missing,[])
 
+    def test_latest_query_omits_optional_date_bounds_and_is_bounded(self):
+        schema={"properties":{"dataset":{"enum":["stocks","index"]},"symbol":{},"interval":{"enum":["1minute"]},
+                "start":{},"end":{},"desc":{},"limit":{"maximum":1000}},
+                "required":["dataset","symbol","interval"]}
+        args,missing=build_latest_candle_args(schema)
+        self.assertEqual(args,{"dataset":"stocks","symbol":"RELIANCE","interval":"1minute","desc":True,"limit":3})
+        self.assertEqual(missing,[])
+
+    def test_latest_query_rejects_required_date_bounds(self):
+        schema={"properties":{"symbol":{},"interval":{},"start":{},"end":{},"desc":{}},
+                "required":["symbol","interval","start","end"]}
+        args,missing=build_latest_candle_args(schema)
+        self.assertIn("latest query requires optional date bounds",missing)
+
+    def test_list_symbols_args_are_bounded(self):
+        schema={"properties":{"dataset":{"enum":["stocks","index"]},"limit":{"maximum":50}},
+                "required":["dataset"]}
+        args,missing=build_list_symbols_args(schema)
+        self.assertEqual(args,{"dataset":"stocks","limit":50})
+        self.assertEqual(missing,[])
+
     def test_parse_json_and_sse(self):
         class Resp:
             headers={"content-type":"text/event-stream"}

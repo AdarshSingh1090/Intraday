@@ -54,6 +54,63 @@ def build_candle_args(schema,symbol="RELIANCE",day="2026-10-15"):
     return args,missing
 
 
+
+def build_latest_candle_args(schema,symbol="RELIANCE"):
+    """Build a bounded latest-candle query using desc=True, without date filters."""
+    args,missing=build_candle_args(schema,symbol,day="")
+    required=set(schema.get("required",[])) if isinstance(schema,dict) else set()
+    date_keys=[k for k in args if k.lower() in ("start","start_date","from","from_date","date_from","date","trading_date","end","end_date","to","to_date","date_to")]
+    if any(k in required for k in date_keys):
+        return args,["latest query requires optional date bounds"]
+    for k in date_keys: args.pop(k,None)
+    desc_key=next((k for k in schema.get("properties",{}) if k.lower() in ("desc","descending","reverse")),None)
+    if desc_key: args[desc_key]=True
+    else: missing.append("latest query requires descending flag")
+    limit_key=next((k for k in schema.get("properties",{}) if k.lower() in ("limit","max_rows","count")),None)
+    if limit_key:
+        maximum=schema["properties"][limit_key].get("maximum")
+        args[limit_key]=min(3,int(maximum)) if maximum else 3
+    return args,missing
+
+
+def build_list_symbols_args(schema,dataset="stocks"):
+    """Build a conservative list_symbols query from its advertised schema."""
+    args={}
+    props=schema.get("properties",{}) if isinstance(schema,dict) else {}
+    for key,prop in props.items():
+        low=key.lower();enum=prop.get("enum",[])
+        if low in ("dataset","source","market"):
+            args[key]=dataset if dataset in enum else enum[0] if enum else dataset
+        elif low in ("limit","max_rows","count"):
+            maximum=prop.get("maximum");args[key]=min(200,int(maximum)) if maximum else 200
+    missing=[k for k in schema.get("required",[]) if k not in args] if isinstance(schema,dict) else []
+    return args,missing
+
+
+def summarize_tool_result(result):
+    structured=result.get("structuredContent") if isinstance(result,dict) else None
+    content=result.get("content",[]) if isinstance(result,dict) else []
+    text_items=[x.get("text","")[:1500] for x in content if x.get("type")=="text"]
+    decoded=[]
+    for raw in text_items:
+        try: decoded.append(json.loads(raw))
+        except Exception: pass
+    data=structured if structured is not None else decoded[0] if decoded else None
+    symbols=[]
+    if isinstance(data,list):
+        symbols=[str(x.get("symbol",x.get("ticker",x.get("name","")))) if isinstance(x,dict) else str(x) for x in data]
+    elif isinstance(data,dict):
+        for key in ("symbols","items","data","rows"):
+            value=data.get(key)
+            if isinstance(value,list):
+                symbols=[str(x.get("symbol",x.get("ticker",x.get("name","")))) if isinstance(x,dict) else str(x) for x in value]
+                break
+    symbols=[x for x in symbols if x and x.lower()!="none"]
+    return {"is_error":bool(result.get("isError",False)) if isinstance(result,dict) else None,
+            "structured_content_type":type(structured).__name__ if structured is not None else None,
+            "symbol_count":len(symbols),"contains_reliance":any(x.upper()=="RELIANCE" for x in symbols),
+            "sample_symbols":symbols[:10],"text_content":text_items[:2]}
+
 def _extract_rows(result):
     if not isinstance(result,dict):return result if isinstance(result,list) else []
     structured=result.get("structuredContent")
@@ -138,18 +195,37 @@ def probe(directory,output,endpoint=ENDPOINT,session=None,day="2026-10-15"):
         listed,sid,ls,lc=_rpc(session,endpoint,{"jsonrpc":"2.0","id":2,"method":"tools/list"},sid)
         tools=(listed or {}).get("result",{}).get("tools",[])
         report["tools_list"]={"http_status":ls,"content_type":lc,"tool_names":[t.get("name") for t in tools]}
+        schemas={t.get("name"):_tool_schema(tools,t.get("name")) for t in tools}
+        report["tool_schemas"]={name:{"required":schema.get("required",[]),"properties":{k:{"type":v.get("type"),"enum":v.get("enum"),"description":v.get("description")} for k,v in schema.get("properties",{}).items()}} for name,schema in schemas.items() if schema}
+        if schemas.get("list_symbols") is not None:
+            lsargs,lmissing=build_list_symbols_args(schemas["list_symbols"],"stocks")
+            report["list_symbols_request"]={"args":lsargs,"missing_required":lmissing}
+            if not lmissing:
+                listed,sid,lss,lct=_rpc(session,endpoint,{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_symbols","arguments":lsargs}},sid,timeout=30)
+                lres=(listed or {}).get("result",{})
+                report["list_symbols_response"]={"http_status":lss,"content_type":lct,"jsonrpc_error":(listed or {}).get("error"),
+                    **summarize_tool_result(lres)}
         if any(t.get("name")=="dataset_status" for t in tools):
-            ds,sid,dss,dct=_rpc(session,endpoint,{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"dataset_status","arguments":{}}},sid)
+            ds,sid,dss,dct=_rpc(session,endpoint,{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"dataset_status","arguments":{}}},sid)
             dres=(ds or {}).get("result",{})
             report["dataset_status"]={"http_status":dss,"content_type":dct,"jsonrpc_error":(ds or {}).get("error",""),
                 "is_error":dres.get("isError",False),"text":[x.get("text","")[:1000] for x in dres.get("content",[]) if x.get("type")=="text"][:2],
                 "structured_content":json.dumps(dres.get("structuredContent"),default=str)[:1500] if dres.get("structuredContent") is not None else None}
-        schema=_tool_schema(tools,"get_candles")
+        schema=schemas.get("get_candles")
         if schema is None:report["status"]="GET_CANDLES_TOOL_MISSING";return _write(report,output)
         args,missing=build_candle_args(schema,"RELIANCE",day)
         report["tool_schema"]={"properties":sorted(schema.get("properties",{})),"required":schema.get("required",[]),"args":args,"missing_required":missing}
         if missing:report["status"]="TOOL_SCHEMA_UNSUPPORTED";return _write(report,output)
-        called,sid,cs,cc=_rpc(session,endpoint,{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"get_candles","arguments":args}},sid,timeout=30)
+        latest_args,latest_missing=build_latest_candle_args(schema,"RELIANCE")
+        report["latest_candle_request"]={"args":latest_args,"missing_required":latest_missing}
+        if not latest_missing:
+            latest,sid,lcs,lct=_rpc(session,endpoint,{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"get_candles","arguments":latest_args}},sid,timeout=30)
+            latest_result=(latest or {}).get("result",{});latest_rows=_extract_rows(latest_result);latest_bars=normalize_rows(latest_rows)
+            report["latest_candle_response"]={"http_status":lcs,"content_type":lct,"jsonrpc_error":(latest or {}).get("error"),
+                "is_error":latest_result.get("isError",False),"returned_rows":len(latest_rows),"normalized_rows":len(latest_bars),
+                "timestamps_first_last":[str(latest_bars.timestamp.min()),str(latest_bars.timestamp.max())] if not latest_bars.empty else [],
+                "row_keys":sorted(latest_rows[0].keys()) if latest_rows and isinstance(latest_rows[0],dict) else []}
+        called,sid,cs,cc=_rpc(session,endpoint,{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"get_candles","arguments":args}},sid,timeout=30)
         result=(called or {}).get("result",{});rows=_extract_rows(result);bars=normalize_rows(rows)
         report["tool_call"]={"http_status":cs,"content_type":cc,"jsonrpc_error":(called or {}).get("error"),"is_error":result.get("isError",False),
             "returned_rows":len(rows),"normalized_rows":len(bars),"row_keys":sorted(rows[0].keys()) if rows and isinstance(rows[0],dict) else [],
