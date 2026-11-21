@@ -119,6 +119,14 @@ jobs:
             --target-date 2026-10-15 \
             --sanity-date 2026-11-19 \
             --output reports/nse_epoch_probe.json
+      - name: Probe public hosted Kaggle-backed stock-candle MCP (no auth)
+        continue-on-error: true
+        run: |
+          mkdir -p reports
+          python -m market_intelligence.public_stock_mcp_probe \
+            --directory data/research \
+            --date 2026-10-15 \
+            --output reports/public_stock_mcp_probe.json
       - name: Compare yfinance history/download interfaces for recurring missing timestamps
         run: |
           mkdir -p reports
