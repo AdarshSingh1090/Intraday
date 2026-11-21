@@ -92,6 +92,21 @@ jobs:
             --symbols RELIANCE.NS,TCS.NS,INFY.NS,HDFCBANK.NS,ICICIBANK.NS,SBIN.NS,AXISBANK.NS,KOTAKBANK.NS,BHARTIARTL.NS,ITC.NS \
             --session-end 15:15 \
             --output reports/huggingface_minute_probe.json
+      - name: Install free NSE chart probe dependency
+        continue-on-error: true
+        run: |
+          pip install nsemine==2.2.1
+      - name: Probe public NSE historical chart API (no auth)
+        continue-on-error: true
+        env:
+          TZ: Asia/Kolkata
+        run: |
+          mkdir -p reports
+          python -m market_intelligence.nse_chart_probe \
+            --directory data/research \
+            --symbols RELIANCE.NS,TCS.NS,INFY.NS,HDFCBANK.NS,ICICIBANK.NS,SBIN.NS,AXISBANK.NS,KOTAKBANK.NS,BHARTIARTL.NS,ITC.NS \
+            --date 2026-10-15 \
+            --output reports/nse_chart_probe.json
       - name: Compare yfinance history/download interfaces for recurring missing timestamps
         run: |
           mkdir -p reports
