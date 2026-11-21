@@ -30,8 +30,9 @@ class CandidateProbeTests(unittest.TestCase):
         big_chunk=[{"columns":[{"valid":True,"compressed_size":MAX_COLUMN_CHUNK_BYTES+1}],
                     "compressed_bytes_total":MAX_COLUMN_CHUNK_BYTES+1,"all_ranges_valid":True}]
         self.assertEqual(_check_candidate_budget(big_chunk)["status"],"SINGLE_CHUNK_CAP_EXCEEDED")
-        over=[{"columns":[{"valid":True,"compressed_size":MAX_ROW_DATA_BYTES//2+1}],
-               "compressed_bytes_total":MAX_ROW_DATA_BYTES//2+1,"all_ranges_valid":True} for _ in range(2)]
+        chunk_size=MAX_COLUMN_CHUNK_BYTES-1
+        over=[{"columns":[{"valid":True,"compressed_size":chunk_size}],
+               "compressed_bytes_total":chunk_size,"all_ranges_valid":True} for _ in range(3)]
         self.assertEqual(_check_candidate_budget(over)["status"],"TOTAL_ROW_DATA_CAP_EXCEEDED")
         self.assertEqual(_check_candidate_budget([])["status"],"NO_CANDIDATE_GROUPS")
 
