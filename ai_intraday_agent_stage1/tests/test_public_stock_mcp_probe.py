@@ -1,6 +1,6 @@
 import unittest
 import pandas as pd
-from market_intelligence.public_stock_mcp_probe import build_candle_args,normalize_rows,aggregate_five,_parse_response,_extract_rows
+from market_intelligence.public_stock_mcp_probe import build_candle_args,build_latest_candle_args,build_list_symbols_args,normalize_rows,aggregate_five,_parse_response,_extract_rows
 
 class PublicStockMCPProbeTests(unittest.TestCase):
     def test_build_args_uses_schema_and_bounded_limit(self):
