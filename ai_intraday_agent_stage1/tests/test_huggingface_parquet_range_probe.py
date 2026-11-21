@@ -1,7 +1,10 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
+import sys
+import types
+from datetime import datetime, timezone
 
 from market_intelligence.huggingface_parquet_range_probe import probe_parquet_footer_ranges
 
@@ -85,6 +88,88 @@ class HuggingFaceParquetRangeProbeTests(unittest.TestCase):
             result = probe_parquet_footer_ranges(Path(temp)/"report.json", session=session)
         self.assertEqual(result["files"][0]["status"], "FOOTER_TOO_LARGE_FOR_BOUNDED_PROBE")
         self.assertEqual(session.get.call_count, 2)
+
+    def test_footer_parser_uses_sparse_file_and_reports_rowgroup_stats(self):
+        file_size = 4096
+        metadata_bytes = b"PARQUET_META"
+        footer = metadata_bytes + len(metadata_bytes).to_bytes(4, "little") + b"PAR1"
+        tail = len(metadata_bytes).to_bytes(4, "little") + b"PAR1"
+        manifest = {"partial": False, "parquet_files": [{
+            "config": "minute", "split": "train", "filename": "0000.parquet",
+            "size": file_size, "url": "https://example.test/file.parquet"
+        }]}
+
+        class Stats:
+            def __init__(self, minimum, maximum):
+                self.min, self.max, self.null_count, self.has_min_max = minimum, maximum, 0, True
+        class Column:
+            def __init__(self, name, stats):
+                self.path_in_schema, self.statistics = name, stats
+        class Group:
+            num_rows, total_byte_size, num_columns = 10, 100, 2
+            def column(self, i):
+                return [Column("symbol", Stats("RELIANCE", "RELIANCE")),
+                        Column("timestamp", Stats(datetime(2026,10,15,6,15,tzinfo=timezone.utc),
+                                                datetime(2026,10,15,6,24,tzinfo=timezone.utc)))][i]
+        class Field:
+            def __init__(self, name, typ):
+                self.name, self.type = name, typ
+        class Schema:
+            def __iter__(self):
+                return iter([Field("symbol", "string"), Field("timestamp", "timestamp[us, tz=UTC]")])
+        class Meta:
+            num_rows, num_row_groups = 10, 1
+            schema_arrow = Schema()
+            schema = []
+            def row_group(self, i):
+                return Group()
+        pyarrow = types.ModuleType("pyarrow")
+        parquet = types.ModuleType("pyarrow.parquet")
+        def read_metadata(path):
+            with open(path, "rb") as f:
+                f.seek(0)
+                self.assertEqual(f.read(4), b"PAR1")
+                f.seek(file_size - 8)
+                self.assertEqual(f.read(8), len(metadata_bytes).to_bytes(4, "little")+b"PAR1")
+            return Meta()
+        parquet.read_metadata = read_metadata
+        pyarrow.parquet = parquet
+        session = Mock()
+        session.get.side_effect = [
+            RangeResponse(200, b"", json_payload=manifest),
+            RangeResponse(206, tail, f"bytes {file_size-8}-{file_size-1}/{file_size}"),
+            RangeResponse(206, footer, f"bytes {file_size-len(footer)}-{file_size-1}/{file_size}"),
+        ]
+        with patch.dict(sys.modules, {"pyarrow": pyarrow, "pyarrow.parquet": parquet}):
+            with tempfile.TemporaryDirectory() as temp:
+                result = probe_parquet_footer_ranges(Path(temp)/"report.json", session=session)
+        parsed = result["files"][0]["metadata_parse"]
+        self.assertEqual(parsed["status"], "METADATA_PARSED")
+        self.assertEqual(parsed["num_row_groups"], 1)
+        self.assertEqual(parsed["candidate_row_groups_for_target"][0]["symbols_possible"], ["RELIANCE.NS"])
+        self.assertFalse(result["row_data_download_attempted"])
+
+    def test_total_footer_budget_prevents_later_range_requests(self):
+        file_size = 2048
+        metadata = b"x" * 40
+        footer = metadata + len(metadata).to_bytes(4, "little") + b"PAR1"
+        tail = len(metadata).to_bytes(4, "little") + b"PAR1"
+        manifest = {"partial": False, "parquet_files": [
+            {"config": "minute", "split": "train", "filename": "0000.parquet", "size": file_size, "url": "https://example.test/0"},
+            {"config": "minute", "split": "train", "filename": "0001.parquet", "size": file_size, "url": "https://example.test/1"},
+        ]}
+        session = Mock()
+        session.get.side_effect = [
+            RangeResponse(200, b"", json_payload=manifest),
+            RangeResponse(206, tail, f"bytes {file_size-8}-{file_size-1}/{file_size}"),
+            RangeResponse(206, footer, f"bytes {file_size-len(footer)}-{file_size-1}/{file_size}"),
+            RangeResponse(206, tail, f"bytes {file_size-8}-{file_size-1}/{file_size}"),
+        ]
+        with tempfile.TemporaryDirectory() as temp:
+            result = probe_parquet_footer_ranges(Path(temp)/"report.json", session=session, max_total_footer_bytes=60)
+        self.assertEqual(result["files"][0]["status"], "FOOTER_RANGE_RETRIEVED")
+        self.assertEqual(result["files"][1]["status"], "TOTAL_FOOTER_BUDGET_EXCEEDED")
+        self.assertEqual(session.get.call_count, 4)
 
 
 if __name__ == "__main__":

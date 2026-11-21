@@ -34,7 +34,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           # yfinance's optional repair=True path requires scipy.
-          pip install scipy scikit-learn openchart
+          pip install scipy scikit-learn openchart pyarrow
       - name: Set Yahoo intraday-compatible date window
         id: dates
         run: |
