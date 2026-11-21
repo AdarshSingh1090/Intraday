@@ -217,10 +217,9 @@ class HuggingFaceParquetRangeProbeTests(unittest.TestCase):
         single = [{"columns":[{"valid":True,"compressed_size":MAX_CANDIDATE_COLUMN_CHUNK_BYTES+1}],
                    "compressed_bytes_total":MAX_CANDIDATE_COLUMN_CHUNK_BYTES+1,"all_ranges_valid":True}]
         self.assertEqual(_summarize_candidate_chunk_plan(single)["status"], "SINGLE_CHUNK_CAP_EXCEEDED")
-        total = [{"columns":[{"valid":True,"compressed_size":MAX_CANDIDATE_CHUNK_PLAN_BYTES//2+1}],
-                   "compressed_bytes_total":MAX_CANDIDATE_CHUNK_PLAN_BYTES//2+1,"all_ranges_valid":True},
-                  {"columns":[{"valid":True,"compressed_size":MAX_CANDIDATE_CHUNK_PLAN_BYTES//2+1}],
-                   "compressed_bytes_total":MAX_CANDIDATE_CHUNK_PLAN_BYTES//2+1,"all_ranges_valid":True}]
+        chunk_size = MAX_CANDIDATE_COLUMN_CHUNK_BYTES - 1
+        total = [{"columns":[{"valid":True,"compressed_size":chunk_size}],
+                  "compressed_bytes_total":chunk_size,"all_ranges_valid":True} for _ in range(5)]
         self.assertEqual(_summarize_candidate_chunk_plan(total)["status"], "TOTAL_PLAN_CAP_EXCEEDED")
 
 if __name__ == "__main__":
