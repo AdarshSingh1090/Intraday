@@ -205,6 +205,8 @@ def probe_candidate_rowgroups(report_path, output, target_symbol="RELIANCE.NS",
         "candidate_budget": budget,
         "row_data_bytes_read": 0,
         "footer_metadata_bytes_read": 0,
+        "tail_bytes_read": 0,
+        "total_range_bytes_read": 0,
         "range_requests": [],
         "target_bars": {},
         "neighbor_validation": None,
@@ -232,6 +234,7 @@ def probe_candidate_rowgroups(report_path, output, target_symbol="RELIANCE.NS",
                 break
             if group["filename"] not in footer_cache:
                 tail = _range_request(session, url, file_size - 8, file_size - 1)
+                result["tail_bytes_read"] += tail.get("bytes_read", 0)
                 result["range_requests"].append({"kind": "tail", "filename": group["filename"],
                                                  **{k: v for k, v in tail.items() if k != "data"}})
                 if not tail.get("range_valid") or tail.get("data") is None:
@@ -242,17 +245,18 @@ def probe_candidate_rowgroups(report_path, output, target_symbol="RELIANCE.NS",
                     break
                 footer_start = file_size - 8 - footer_length
                 footer = _range_request(session, url, footer_start, file_size - 1)
+                result["footer_metadata_bytes_read"] += footer.get("bytes_read", 0)
                 result["range_requests"].append({"kind": "footer", "filename": group["filename"],
                                                  **{k: v for k, v in footer.items() if k != "data"}})
                 if not footer.get("range_valid") or footer.get("data") is None:
                     failure = "FOOTER_RANGE_INVALID"
                     break
                 footer_cache[group["filename"]] = footer["data"]
-                result["footer_metadata_bytes_read"] += footer["bytes_read"]
             for chunk in group["columns"]:
                 start, end = int(chunk["start_offset"]), int(chunk["end_exclusive"])
                 result["row_data_download_attempted"] = True
                 response = _range_request(session, url, start, end - 1)
+                result["row_data_bytes_read"] += response.get("bytes_read", 0)
                 result["range_requests"].append({"kind": "column_chunk", "filename": group["filename"],
                                                  "row_group_index": group["row_group_index"],
                                                  "column": chunk["column"],
@@ -260,11 +264,11 @@ def probe_candidate_rowgroups(report_path, output, target_symbol="RELIANCE.NS",
                 if not response.get("range_valid") or response.get("data") is None:
                     failure = "COLUMN_CHUNK_RANGE_INVALID"
                     break
-                result["row_data_bytes_read"] += response["bytes_read"]
                 fetched.append({**chunk, "filename": group["filename"],
                                "row_group_index": group["row_group_index"], "data": response["data"]})
             if failure:
                 break
+        result["total_range_bytes_read"] = result["row_data_bytes_read"] + result["footer_metadata_bytes_read"] + result["tail_bytes_read"]
         if failure:
             result["status"] = failure
         else:
