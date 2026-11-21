@@ -45,6 +45,13 @@ class HuggingFaceMinuteProbeTests(unittest.TestCase):
         self.assertEqual(params["config"], "minute")
         self.assertEqual(params["split"], "train")
         self.assertEqual(params["length"], 100)
+        # Viewer responses omit config/split; report should preserve request context.
+        self.assertEqual(result["config"], "minute")
+        self.assertEqual(result["split"], "train")
+        self.assertEqual(result["requested_config"], "minute")
+        self.assertEqual(result["requested_split"], "train")
+        self.assertIsNone(result["response_config"])
+        self.assertIsNone(result["response_split"])
 
     def test_aggregates_only_complete_exact_5m_window(self):
         stamp = expected_5m_grid(pd.Timestamp("2026-10-15").date())[30]
@@ -90,6 +97,9 @@ class HuggingFaceMinuteProbeTests(unittest.TestCase):
             self.assertEqual(day_report["status"], "OK")
             self.assertFalse(day_report["partial_index"])
             self.assertEqual(day_report["neighbor_validation_against_yahoo_5m"]["matches"], 2)
+            self.assertEqual(day_report["candidate_status"], "CANDIDATES_AVAILABLE_DIAGNOSTIC_ONLY")
+            self.assertFalse(report["independent_provider_comparison"])
+            self.assertFalse(report["source_provenance_verified"])
             self.assertFalse(report["datasets_modified"])
             self.assertEqual(len(pd.read_csv(source)), len(original))
             self.assertTrue((Path(temp)/"report.json").exists())
@@ -116,10 +126,48 @@ class HuggingFaceMinuteProbeTests(unittest.TestCase):
             query = report["reports"]["RELIANCE.NS"]["missing_by_day"]["2026-10-15"]["public_dataset_query"]
             self.assertEqual(query["raw_complete_candidate_count"], 1)
             self.assertEqual(query["candidate_status"], "WITHHELD_PARTIAL_INDEX")
+            self.assertEqual(query["raw_candidates_unverified"][str(missing)]["open"], 100)
+            self.assertIsNone(query["reconstructed_5m_candidates"][str(missing)])
             self.assertIsNone(query["reconstructed_5m_candidates"][str(missing)])
             self.assertEqual(report["summary"]["exact_5m_candidates_found"], 0)
             self.assertFalse(report["datasets_modified"])
             self.assertEqual(len(pd.read_csv(source)), len(original))
+
+    def test_candidate_withheld_when_neighbor_validation_mismatches(self):
+        day = pd.Timestamp("2026-10-15").date()
+        grid = expected_5m_grid(day)
+        missing = [grid[30], grid[31]]
+        original = pd.DataFrame({
+            "timestamp": grid.delete([30, 31]).astype(str), "open": 100, "high": 101,
+            "low": 99, "close": 100.5, "volume": 2000
+        })
+        window_start = missing[0] - pd.Timedelta(minutes=5)
+        window_end = missing[-1] + pd.Timedelta(minutes=10)
+        minute_timestamps = pd.date_range(window_start, window_end, freq="1min", inclusive="left")
+        minute_rows = [{
+            "symbol": "RELIANCE",
+            "timestamp": stamp.tz_convert("UTC").isoformat(),
+            "open": 101, "high": 102, "low": 100, "close": 101.5, "volume": 400, "oi": 0,
+        } for stamp in minute_timestamps]
+        payload = {"rows": [{"row_idx": i, "row": row} for i, row in enumerate(minute_rows)],
+                   "partial": False, "num_rows_total": len(minute_rows)}
+        session = Mock()
+        session.get.return_value = FakeResponse(payload)
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "RELIANCE.NS_5m.csv"
+            original.to_csv(source, index=False)
+            report = probe_public_minute_dataset(temp, ["RELIANCE.NS"], Path(temp)/"report.json", session=session)
+            query = report["reports"]["RELIANCE.NS"]["missing_by_day"]["2026-10-15"]["public_dataset_query"]
+            self.assertEqual(query["candidate_status"], "WITHHELD_NEIGHBOR_MISMATCH_OR_UNVALIDATED")
+            self.assertEqual(report["summary"]["exact_5m_candidates_found"], 0)
+            self.assertEqual(query["raw_complete_candidate_count"], 2)
+            self.assertIsNone(query["reconstructed_5m_candidates"][str(missing[0])])
+            self.assertIsNotNone(query["raw_candidates_unverified"][str(missing[0])])
+            self.assertEqual(query["neighbor_validation_against_yahoo_5m"]["mismatches"], 2)
+            self.assertEqual(len(query["neighbor_validation_against_yahoo_5m"]["mismatch_examples"]), 2)
+            self.assertFalse(report["datasets_modified"])
+            self.assertEqual(len(pd.read_csv(source)), len(original))
+
 
     def test_filter_retries_transient_500_and_reports_attempts(self):
         payload = {"rows": [{"row": {"timestamp": "2026-10-15T06:15:00Z",

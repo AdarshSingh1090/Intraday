@@ -157,12 +157,39 @@ def _parse_footer_metadata(file_size, footer_range_data, footer_length, target_s
             handle.truncate(file_size)
         metadata = pq.read_metadata(temp_path)
         arrow_schema = getattr(metadata, "schema_arrow", None)
+        parquet_schema = getattr(metadata, "schema", None)
+        parquet_columns = {
+            col.name: col for col in parquet_schema
+        } if parquet_schema is not None else {}
         fields = []
         if arrow_schema is not None:
-            fields = [{"name": field.name, "type": str(field.type)} for field in arrow_schema]
+            for field in arrow_schema:
+                field_type = str(field.type) if field.type is not None else None
+                parquet_col = parquet_columns.get(field.name)
+                physical = getattr(parquet_col, "physical_type", None) if parquet_col is not None else None
+                logical = getattr(parquet_col, "logical_type", None) if parquet_col is not None else None
+                if field_type is None or field_type.lower() in {"none", "null"}:
+                    field_type = str(logical) if logical is not None and str(logical).lower() not in {"none", "unknown"} else None
+                if field_type is None:
+                    field_type = str(physical) if physical is not None else "UNKNOWN"
+                fields.append({
+                    "name": field.name,
+                    "type": field_type,
+                    "physical_type": str(physical) if physical is not None else None,
+                    "logical_type": str(logical) if logical is not None and str(logical).lower() not in {"none", "unknown"} else None,
+                })
         else:
-            fields = [{"name": col.name, "type": str(getattr(col, "logical_type", col.physical_type))}
-                      for col in metadata.schema]
+            for col in (parquet_schema or []):
+                logical = getattr(col, "logical_type", None)
+                physical = getattr(col, "physical_type", None)
+                logical_text = str(logical) if logical is not None and str(logical).lower() not in {"none", "unknown"} else None
+                physical_text = str(physical) if physical is not None else None
+                fields.append({
+                    "name": col.name,
+                    "type": logical_text or physical_text or "UNKNOWN",
+                    "physical_type": physical_text,
+                    "logical_type": logical_text,
+                })
         columns = [field["name"] for field in fields]
         symbol_candidates = [name for name in columns if name.lower() in {"symbol", "ticker", "stock", "stock_symbol", "instrument"}]
         time_candidates = [name for name in columns if name.lower() in {"timestamp", "datetime", "date_time", "time", "date"}]
@@ -216,6 +243,20 @@ def _parse_footer_metadata(file_size, footer_range_data, footer_length, target_s
                 matched = [symbol for symbol, match in symbol_matches.items() if match]
                 if matched:
                     candidate_groups.append({"row_group_index": rg_index, "symbols_possible": matched})
+        timestamp_stats_groups = sum(
+            rg.get("timestamp_min_utc") is not None and rg.get("timestamp_max_utc") is not None
+            for rg in row_groups
+        )
+        timestamp_overlap_groups = sum(rg.get("target_window_overlap") is True for rg in row_groups)
+        symbol_candidate_groups = sum(
+            bool(rg.get("target_symbol_matches") and any(rg["target_symbol_matches"].values()))
+            for rg in row_groups
+        )
+        date_pruning_status = (
+            "EFFECTIVE"
+            if timestamp_stats_groups and timestamp_overlap_groups < timestamp_stats_groups
+            else ("INEFFECTIVE_ALL_GROUPS_OVERLAP_TARGET" if timestamp_stats_groups else "NO_TIMESTAMP_STATS")
+        )
         return {
             "status": "METADATA_PARSED",
             "num_rows": metadata.num_rows,
@@ -225,6 +266,10 @@ def _parse_footer_metadata(file_size, footer_range_data, footer_length, target_s
             "timestamp_column": timestamp_column,
             "row_groups": row_groups,
             "candidate_row_groups_for_target": candidate_groups,
+            "timestamp_stats_groups": timestamp_stats_groups,
+            "timestamp_overlap_groups": timestamp_overlap_groups,
+            "date_pruning_status": date_pruning_status,
+            "symbol_candidate_groups": symbol_candidate_groups,
             "candidate_pruning_status": (
                 "STATS_AVAILABLE" if symbol_column and timestamp_column else "INSUFFICIENT_SCHEMA_OR_STATS"
             ),

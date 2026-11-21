@@ -114,13 +114,18 @@ class HuggingFaceParquetRangeProbeTests(unittest.TestCase):
         class Field:
             def __init__(self, name, typ):
                 self.name, self.type = name, typ
+        class ParquetColumn:
+            def __init__(self, name, physical, logical=None):
+                self.name, self.physical_type, self.logical_type = name, physical, logical
         class Schema:
             def __iter__(self):
-                return iter([Field("symbol", "string"), Field("timestamp", "timestamp[us, tz=UTC]")])
+                return iter([Field("symbol", "string"), Field("timestamp", "timestamp[us, tz=UTC]"), Field("open", None)])
         class Meta:
             num_rows, num_row_groups = 10, 1
             schema_arrow = Schema()
-            schema = []
+            schema = [ParquetColumn("symbol", "BYTE_ARRAY", "String"),
+                      ParquetColumn("timestamp", "INT64", "Timestamp"),
+                      ParquetColumn("open", "DOUBLE", None)]
             def row_group(self, i):
                 return Group()
         pyarrow = types.ModuleType("pyarrow")
@@ -147,6 +152,10 @@ class HuggingFaceParquetRangeProbeTests(unittest.TestCase):
         self.assertEqual(parsed["status"], "METADATA_PARSED")
         self.assertEqual(parsed["num_row_groups"], 1)
         self.assertEqual(parsed["candidate_row_groups_for_target"][0]["symbols_possible"], ["RELIANCE.NS"])
+        open_field = next(field for field in parsed["schema"] if field["name"] == "open")
+        self.assertEqual(open_field["type"], "DOUBLE")
+        self.assertEqual(open_field["physical_type"], "DOUBLE")
+        self.assertEqual(parsed["date_pruning_status"], "EFFECTIVE")
         self.assertFalse(result["row_data_download_attempted"])
 
     def test_total_footer_budget_prevents_later_range_requests(self):

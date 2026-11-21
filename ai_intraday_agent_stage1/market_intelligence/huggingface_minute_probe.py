@@ -72,6 +72,7 @@ def _compare_aggregated_to_yahoo(minute_frame, original_frame, day, start, end):
     existing = original_frame.set_index("timestamp")
     compared = matches = mismatches = 0
     first_mismatch = None
+    mismatch_examples = []
     for stamp in expected_5m_grid(day):
         if stamp < start or stamp >= end or stamp not in existing.index:
             continue
@@ -90,18 +91,22 @@ def _compare_aggregated_to_yahoo(minute_frame, original_frame, day, start, end):
             matches += 1
         else:
             mismatches += 1
+            mismatch = {
+                "timestamp": str(stamp),
+                "dataset_1m_aggregate": candidate,
+                "yahoo_5m": {k: float(row[k]) for k in OHLCV[1:]},
+            }
             if first_mismatch is None:
-                first_mismatch = {
-                    "timestamp": str(stamp),
-                    "dataset_1m_aggregate": candidate,
-                    "yahoo_5m": {k: float(row[k]) for k in OHLCV[1:]},
-                }
+                first_mismatch = mismatch
+            if len(mismatch_examples) < 5:
+                mismatch_examples.append(mismatch)
     return {
-        "status": "COMPARED" if compared else "NOT_COMPARABLE",
+        "status": "MATCHED" if compared and mismatches == 0 else ("MISMATCH" if mismatches else "NOT_COMPARABLE"),
         "compared_existing_bars": compared,
         "matches": matches,
         "mismatches": mismatches,
         "first_mismatch": first_mismatch,
+        "mismatch_examples": mismatch_examples,
         "tolerance": {"prices": 1e-4, "volume": 1e-9},
     }
 
@@ -168,8 +173,14 @@ def fetch_public_minute_window(session, symbol, start, end, timeout=45, max_retr
         "num_rows_total": payload.get("num_rows_total"),
         "num_rows_returned": len(frame),
         "dataset": payload.get("dataset", DATASET_ID),
-        "config": payload.get("config", "default"),
-        "split": payload.get("split", "train"),
+        # Viewer responses sometimes omit config/split fields. Preserve the
+        # actual request context rather than mislabeling it as "default".
+        "config": payload.get("config", params["config"]),
+        "split": payload.get("split", params["split"]),
+        "requested_config": params["config"],
+        "requested_split": params["split"],
+        "response_config": payload.get("config"),
+        "response_split": payload.get("split"),
         "request_attempts": attempts,
         "retry_statuses": retry_statuses,
     }
@@ -225,21 +236,28 @@ def probe_public_minute_dataset(directory, symbols, output, session_start="09:15
                             for stamp in missing
                         }
                         raw_candidate_count = sum(v is not None for v in raw_candidates.values())
-                        if partial is False:
-                            candidates = raw_candidates
-                            candidate_status = "CANDIDATES_AVAILABLE" if raw_candidate_count else "NO_COMPLETE_WINDOW"
-                        else:
-                            candidates = {stamp: None for stamp in raw_candidates}
-                            if raw_candidate_count:
-                                candidate_status = (
-                                    "WITHHELD_PARTIAL_INDEX" if partial is True
-                                    else "WITHHELD_INDEX_COMPLETENESS_UNKNOWN"
-                                )
-                            else:
-                                candidate_status = "NO_COMPLETE_WINDOW"
                         neighbor_validation = _compare_aggregated_to_yahoo(
                             frame, original, day, start, end
                         )
+                        neighbors_match = (
+                            neighbor_validation["status"] == "MATCHED"
+                            and neighbor_validation["compared_existing_bars"] > 0
+                            and neighbor_validation["mismatches"] == 0
+                        )
+                        if partial is False and raw_candidate_count and neighbors_match:
+                            candidates = raw_candidates
+                            candidate_status = "CANDIDATES_AVAILABLE_DIAGNOSTIC_ONLY"
+                        else:
+                            candidates = {stamp: None for stamp in raw_candidates}
+                            if raw_candidate_count and partial is True:
+                                candidate_status = "WITHHELD_PARTIAL_INDEX"
+                            elif raw_candidate_count and partial is not False:
+                                candidate_status = "WITHHELD_INDEX_COMPLETENESS_UNKNOWN"
+                            elif raw_candidate_count and not neighbors_match:
+                                candidate_status = "WITHHELD_NEIGHBOR_MISMATCH_OR_UNVALIDATED"
+                            else:
+                                candidate_status = "NO_COMPLETE_WINDOW"
+                        raw_unverified = raw_candidates if candidates == {stamp: None for stamp in raw_candidates} else None
                         request_report = {
                             "status": status,
                             "request_attempts": result["request_attempts"],
@@ -250,12 +268,17 @@ def probe_public_minute_dataset(directory, symbols, output, session_start="09:15
                             "window_start_ist": str(start),
                             "window_end_exclusive_ist": str(end),
                             "raw_complete_candidate_count": raw_candidate_count,
+                            "raw_candidates_unverified": raw_unverified,
                             "candidate_status": candidate_status,
                             "reconstructed_5m_candidates": candidates,
                             "neighbor_validation_against_yahoo_5m": neighbor_validation,
                             "dataset": result["dataset"],
                             "config": result["config"],
                             "split": result["split"],
+                            "requested_config": result["requested_config"],
+                            "requested_split": result["requested_split"],
+                            "response_config": result["response_config"],
+                            "response_split": result["response_split"],
                         }
                     except DatasetViewerHTTPError as exc:
                         if exc.index_loading:
@@ -306,19 +329,36 @@ def probe_public_minute_dataset(directory, symbols, output, session_start="09:15
         "authentication_required": False,
         "cost": "free public access",
         "provenance_warning": "Dataset metadata is tagged upstox; source provenance and completeness have not been independently verified. Filter index may be partial for datasets over 5GB.",
-        "independent_provider_comparison": True,
+        "independent_provider_comparison": False,
+    "candidate_source_is_separate_from_yahoo": True,
+    "source_provenance_verified": False,
+    "source_provenance_note": "Dataset metadata is tagged Upstox, but actual provenance has not been independently verified.",
         "data_repaired": False,
         "datasets_modified": False,
         "interpretation": (
             "Exact 5m candidates require five consecutive 1m bars and a complete (partial=false) dataset-viewer index. "
             "Transient HTTP 429/5xx responses are retried once; if the viewer reports its index is loading, a circuit breaker "
-            "skips redundant symbol queries. Candidates are only reported; no CSVs are modified. Neighbor bars are compared to Yahoo when possible."
+            "skips redundant symbol queries. A candidate is reported only when partial=false and all available neighboring Yahoo bars match. "
+            "When the index is partial or neighbor checks fail, raw aggregates are retained only as unverified diagnostics. "
+            "Dataset provenance is unverified and no CSVs are modified."
         ),
         "summary": {
             "symbols_with_gaps": sum(r.get("missing_count_original", 0) > 0 for r in reports.values()),
             "missing_5m_timestamps_probed": total_missing,
             "exact_5m_candidates_found": total_candidates,
             "successful_public_queries": total_successful,
+            "successful_complete_index_queries": sum(
+                day["public_dataset_query"].get("status") == "OK"
+                and day["public_dataset_query"].get("partial_index") is False
+                for report in reports.values()
+                for day in report.get("missing_by_day", {}).values()
+            ),
+            "successful_partial_index_queries": sum(
+                day["public_dataset_query"].get("status") == "OK"
+                and day["public_dataset_query"].get("partial_index") is True
+                for report in reports.values()
+                for day in report.get("missing_by_day", {}).values()
+            ),
             "dataset_index_loading_circuit_breaker_triggered": viewer_index_loading_circuit_breaker,
         },
         "session": {"start": session_start, "end_exclusive": session_end},

@@ -81,7 +81,7 @@ jobs:
         run: |
           mkdir -p reports
           python -m market_intelligence.huggingface_parquet_range_probe \
-            --max-files 2 \
+            --max-files 11 \
             --output reports/huggingface_parquet_range_probe.json
       - name: Probe public Hugging Face 1-minute dataset for exact recovery candidates
         continue-on-error: true
