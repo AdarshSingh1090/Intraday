@@ -137,6 +137,22 @@ jobs:
             --directory data/research \
             --date 2026-10-15 \
             --output reports/public_stock_mcp_probe.json
+      - name: Install no-login TradingView datafeed
+        continue-on-error: true
+        run: |
+          python -m pip install git+https://github.com/stefanomorni/fork-tvdatafeed.git@1bca18686500b3131837a2c724d2e75fb1580adb
+      - name: Probe public TradingView 5m history (no login)
+        continue-on-error: true
+        env:
+          TZ: Asia/Kolkata
+        run: |
+          mkdir -p reports
+          python -m market_intelligence.tradingview_tvdatafeed_probe \
+            --directory data/research \
+            --symbol RELIANCE.NS \
+            --target-date 2026-10-15 \
+            --n-bars 5000 \
+            --output reports/tradingview_tvdatafeed_probe.json
       - name: Compare yfinance history/download interfaces for recurring missing timestamps
         run: |
           mkdir -p reports
