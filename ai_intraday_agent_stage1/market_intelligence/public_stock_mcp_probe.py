@@ -115,10 +115,13 @@ def summarize_tool_result(result, target_symbol="RELIANCE", target_date="2026-10
 
     # MCP servers may return one JSON object per text content item. Decode all of
     # them instead of treating only the first record as the entire symbol list.
-    payloads = [structured] if structured is not None else decoded
-    records = []
-    for payload in payloads:
-        records.extend(_symbol_records(payload))
+    structured_records = _symbol_records(structured) if structured is not None else []
+    # Some MCP implementations populate structuredContent with generic status
+    # metadata while actual symbol records are delivered as separate text items.
+    records = structured_records
+    if not records:
+        for payload in decoded:
+            records.extend(_symbol_records(payload))
     names = []
     for record in records:
         value = record.get("symbol", record.get("ticker", record.get("name", "")))

@@ -88,4 +88,15 @@ class PublicStockMCPProbeTests(unittest.TestCase):
         self.assertEqual(summary["sample_symbols"],["RELIANCE.NS","TCS"])
         self.assertEqual(summary["decoded_text_payload_count"],0)
 
+    def test_summarize_falls_back_when_structured_content_has_no_symbol_records(self):
+        result={"structuredContent":{"dataset":"stocks","synced":True},
+                "content":[
+                    {"type":"text","text":json.dumps({"symbol":"RELIANCE","rows":100,"start":"2025-01-01","end":"2026-04-08"})},
+                    {"type":"text","text":json.dumps({"symbol":"TCS","rows":200,"start":"2025-01-01","end":"2026-04-08"})}
+                ]}
+        summary=summarize_tool_result(result)
+        self.assertEqual(summary["symbol_count"],2)
+        self.assertTrue(summary["contains_reliance"])
+        self.assertEqual(summary["target_symbol_metadata"][0]["rows"],100)
+
 if __name__=="__main__":unittest.main()
