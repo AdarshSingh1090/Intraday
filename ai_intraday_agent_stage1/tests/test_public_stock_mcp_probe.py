@@ -1,6 +1,6 @@
 import unittest
 import pandas as pd
-from market_intelligence.public_stock_mcp_probe import build_candle_args,build_latest_candle_args,build_list_symbols_args,normalize_rows,aggregate_five,_parse_response,_extract_rows
+from market_intelligence.public_stock_mcp_probe import build_candle_args,build_latest_candle_args,build_list_symbols_args,summarize_tool_result,normalize_rows,aggregate_five,_parse_response,_extract_rows
 
 class PublicStockMCPProbeTests(unittest.TestCase):
     def test_build_args_uses_schema_and_bounded_limit(self):
@@ -60,5 +60,31 @@ class PublicStockMCPProbeTests(unittest.TestCase):
         df=pd.DataFrame(rows);agg=aggregate_five(df,pd.Timestamp("2026-10-15 11:45",tz="Asia/Kolkata"))
         self.assertEqual(agg["open"],100);self.assertEqual(agg["close"],105);self.assertEqual(agg["high"],106);self.assertEqual(agg["low"],99);self.assertEqual(agg["volume"],50)
         self.assertIsNone(aggregate_five(df.iloc[:-1],pd.Timestamp("2026-10-15 11:45",tz="Asia/Kolkata")))
+
+    def test_summarize_parses_each_text_item_as_symbol_metadata(self):
+        result={"content":[
+            {"type":"text","text":json.dumps({"symbol":"ABB","rows":1031866,"start":"2015-02-02T09:15:00+05:30","end":"2026-04-08T12:56:00+05:30"})},
+            {"type":"text","text":json.dumps({"symbol":"RELIANCE","rows":1200,"start":"2026-01-01","end":"2026-04-08"})},
+            {"type":"text","text":json.dumps({"symbol":"RELIANCE","rows":1200,"start":"2026-01-01","end":"2026-04-08"})},
+        ]}
+        summary=summarize_tool_result(result)
+        self.assertEqual(summary["text_content_item_count"],3)
+        self.assertEqual(summary["decoded_text_payload_count"],3)
+        self.assertEqual(summary["symbol_record_count"],3)
+        self.assertEqual(summary["symbol_count"],2)
+        self.assertEqual(summary["sample_symbols"],["ABB","RELIANCE"])
+        self.assertTrue(summary["contains_reliance"])
+        self.assertEqual(summary["reported_rows_total"],1034266)
+        self.assertEqual(summary["reported_end_max"],"2026-04-08")
+        self.assertEqual(summary["target_symbol_metadata"][0]["end"],"2026-04-08")
+        self.assertFalse(summary["target_symbol_metadata"][0]["target_date_within_reported_range"])
+
+    def test_summarize_supports_structured_symbol_list_and_deduplicates(self):
+        result={"structuredContent":{"symbols":[{"ticker":"RELIANCE.NS"},{"ticker":"TCS"},{"ticker":"RELIANCE.NS"}]},
+                "content":[{"type":"text","text":"ignored fallback"}]}
+        summary=summarize_tool_result(result)
+        self.assertEqual(summary["symbol_count"],2)
+        self.assertEqual(summary["sample_symbols"],["RELIANCE.NS","TCS"])
+        self.assertEqual(summary["decoded_text_payload_count"],0)
 
 if __name__=="__main__":unittest.main()

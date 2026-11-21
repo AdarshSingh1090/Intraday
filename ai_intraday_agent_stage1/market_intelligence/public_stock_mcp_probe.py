@@ -87,29 +87,79 @@ def build_list_symbols_args(schema,dataset="stocks"):
     return args,missing
 
 
-def summarize_tool_result(result):
-    structured=result.get("structuredContent") if isinstance(result,dict) else None
-    content=result.get("content",[]) if isinstance(result,dict) else []
-    text_items=[x.get("text","")[:1500] for x in content if x.get("type")=="text"]
-    decoded=[]
-    for raw in text_items:
-        try: decoded.append(json.loads(raw))
-        except Exception: pass
-    data=structured if structured is not None else decoded[0] if decoded else None
-    symbols=[]
-    if isinstance(data,list):
-        symbols=[str(x.get("symbol",x.get("ticker",x.get("name","")))) if isinstance(x,dict) else str(x) for x in data]
-    elif isinstance(data,dict):
-        for key in ("symbols","items","data","rows"):
-            value=data.get(key)
-            if isinstance(value,list):
-                symbols=[str(x.get("symbol",x.get("ticker",x.get("name","")))) if isinstance(x,dict) else str(x) for x in value]
-                break
-    symbols=[x for x in symbols if x and x.lower()!="none"]
-    return {"is_error":bool(result.get("isError",False)) if isinstance(result,dict) else None,
-            "structured_content_type":type(structured).__name__ if structured is not None else None,
-            "symbol_count":len(symbols),"contains_reliance":any(x.upper()=="RELIANCE" for x in symbols),
-            "sample_symbols":symbols[:10],"text_content":text_items[:2]}
+def _symbol_records(payload):
+    """Extract symbol metadata records from common MCP JSON payload shapes."""
+    if isinstance(payload, list):
+        return [item if isinstance(item, dict) else {"symbol": item} for item in payload]
+    if isinstance(payload, dict):
+        for key in ("symbols", "items", "data", "rows"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return [item if isinstance(item, dict) else {"symbol": item} for item in value]
+        if any(key in payload for key in ("symbol", "ticker", "name")):
+            return [payload]
+    return []
+
+
+def summarize_tool_result(result, target_symbol="RELIANCE"):
+    structured = result.get("structuredContent") if isinstance(result, dict) else None
+    content = result.get("content", []) if isinstance(result, dict) else []
+    raw_text_items = [x.get("text", "") for x in content if x.get("type") == "text"]
+    text_items = [raw[:1500] for raw in raw_text_items]
+    decoded = []
+    for raw in raw_text_items:
+        try:
+            decoded.append(json.loads(raw))
+        except Exception:
+            continue
+
+    # MCP servers may return one JSON object per text content item. Decode all of
+    # them instead of treating only the first record as the entire symbol list.
+    payloads = [structured] if structured is not None else decoded
+    records = []
+    for payload in payloads:
+        records.extend(_symbol_records(payload))
+    names = []
+    for record in records:
+        value = record.get("symbol", record.get("ticker", record.get("name", "")))
+        if value is not None and str(value).strip() and str(value).lower() != "none":
+            names.append(str(value).strip())
+    unique_symbols = list(dict.fromkeys(names))
+    normalized_target = target_symbol.upper().replace(".NS", "")
+    target_records = [
+        record for record in records
+        if str(record.get("symbol", record.get("ticker", record.get("name", "")))).upper().replace(".NS", "") == normalized_target
+    ]
+
+    row_values = [record.get("rows") for record in records if isinstance(record.get("rows"), (int, float))]
+    starts = [str(record["start"])[:10] for record in records if record.get("start")]
+    ends = [str(record["end"])[:10] for record in records if record.get("end")]
+    target_coverage = []
+    for record in target_records[:5]:
+        start = str(record.get("start", ""))[:10] or None
+        end = str(record.get("end", ""))[:10] or None
+        target_coverage.append({
+            "symbol": record.get("symbol", record.get("ticker", record.get("name"))),
+            "rows": record.get("rows"),
+            "start": start,
+            "end": end,
+            "target_date_within_reported_range": bool(start and end and start <= "2026-10-15" <= end),
+        })
+    return {
+        "is_error": bool(result.get("isError", False)) if isinstance(result, dict) else None,
+        "structured_content_type": type(structured).__name__ if structured is not None else None,
+        "text_content_item_count": len(raw_text_items),
+        "decoded_text_payload_count": len(decoded),
+        "symbol_record_count": len(records),
+        "symbol_count": len(unique_symbols),
+        "contains_reliance": any(x.upper().replace(".NS", "") == "RELIANCE" for x in unique_symbols),
+        "sample_symbols": unique_symbols[:10],
+        "reported_rows_total": sum(row_values) if row_values else None,
+        "reported_start_min": min(starts) if starts else None,
+        "reported_end_max": max(ends) if ends else None,
+        "target_symbol_metadata": target_coverage,
+        "text_content": text_items[:2],
+    }
 
 def _extract_rows(result):
     if not isinstance(result,dict):return result if isinstance(result,list) else []
