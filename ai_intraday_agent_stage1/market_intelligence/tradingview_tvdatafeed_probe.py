@@ -42,6 +42,8 @@ def _normalize_frame(frame):
     if "timestamp" not in out.columns:
         out = out.reset_index()
     timestamp_col = next((c for c in out.columns if str(c).lower() in {"timestamp", "datetime", "date", "time"}), None)
+    if timestamp_col is None and "index" in out.columns:
+        timestamp_col = "index"  # reset_index() on an unnamed DatetimeIndex
     if timestamp_col is None:
         return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
     out["timestamp"] = pd.to_datetime(out[timestamp_col], errors="coerce")
