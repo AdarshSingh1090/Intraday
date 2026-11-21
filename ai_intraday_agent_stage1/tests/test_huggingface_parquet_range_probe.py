@@ -155,7 +155,7 @@ class HuggingFaceParquetRangeProbeTests(unittest.TestCase):
         open_field = next(field for field in parsed["schema"] if field["name"] == "open")
         self.assertEqual(open_field["type"], "DOUBLE")
         self.assertEqual(open_field["physical_type"], "DOUBLE")
-        self.assertEqual(parsed["date_pruning_status"], "EFFECTIVE")
+        self.assertEqual(parsed["date_pruning_status"], "INEFFECTIVE_ALL_GROUPS_OVERLAP_TARGET")
         self.assertFalse(result["row_data_download_attempted"])
 
     def test_total_footer_budget_prevents_later_range_requests(self):
