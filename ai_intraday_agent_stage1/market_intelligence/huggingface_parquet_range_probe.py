@@ -19,6 +19,9 @@ PARQUET_API = "https://datasets-server.huggingface.co/parquet"
 MAX_FILES = 11
 MAX_FOOTER_BYTES = 8 * 1024 * 1024
 MAX_TOTAL_FOOTER_BYTES = 16 * 1024 * 1024
+MAX_CANDIDATE_CHUNK_PLAN_BYTES = 32 * 1024 * 1024
+MAX_CANDIDATE_COLUMN_CHUNK_BYTES = 8 * 1024 * 1024
+TARGET_DATA_COLUMNS = ("symbol", "timestamp", "open", "high", "low", "close", "volume")
 TIMEOUT = 30
 TARGET_START_UTC = "2026-10-15T06:15:00+00:00"
 TARGET_END_UTC = "2026-10-15T06:25:00+00:00"
@@ -128,6 +131,30 @@ def _symbol_in_stats(target, minimum, maximum):
         return min_norm == target_norm
     # A min/max range can only be used as a conservative pruning hint.
     return min_norm <= target_norm <= max_norm
+
+
+def _column_chunk_range(column, file_size, footer_start):
+    """Return a conservative compressed column-chunk byte range from Parquet metadata."""
+    size = getattr(column, "total_compressed_size", None)
+    offsets = [
+        getattr(column, "dictionary_page_offset", None),
+        getattr(column, "data_page_offset", None),
+    ]
+    offsets = [int(value) for value in offsets if value is not None and int(value) >= 4]
+    if not offsets or size is None or int(size) <= 0:
+        return {"valid": False, "reason": "missing_offset_or_compressed_size"}
+    start = min(offsets)
+    end_exclusive = start + int(size)
+    valid = start >= 4 and end_exclusive <= footer_start and end_exclusive <= file_size
+    return {
+        "start_offset": start,
+        "end_exclusive": end_exclusive,
+        "compressed_size": int(size),
+        "uncompressed_size": getattr(column, "total_uncompressed_size", None),
+        "compression": str(getattr(column, "compression", "")) or None,
+        "valid": valid,
+        "reason": None if valid else "range_overlaps_footer_or_exceeds_file",
+    }
 
 
 def _parse_footer_metadata(file_size, footer_range_data, footer_length, target_start, target_end, target_symbols):
@@ -243,6 +270,34 @@ def _parse_footer_metadata(file_size, footer_range_data, footer_length, target_s
                 matched = [symbol for symbol, match in symbol_matches.items() if match]
                 if matched:
                     candidate_groups.append({"row_group_index": rg_index, "symbols_possible": matched})
+        candidate_chunk_plan = []
+        selected_columns = [name for name in TARGET_DATA_COLUMNS if name in columns]
+        footer_start = file_size - footer_length - 8
+        for candidate in candidate_groups:
+            rg = metadata.row_group(candidate["row_group_index"])
+            chunk_items = []
+            for column_index in range(rg.num_columns):
+                column = rg.column(column_index)
+                name = (getattr(column, "path_in_schema", None) or getattr(column, "name", "")).split(".")[-1]
+                if name not in selected_columns:
+                    continue
+                byte_range = _column_chunk_range(column, file_size, footer_start)
+                chunk_items.append({"column": name, **byte_range})
+            candidate_chunk_plan.append({
+                "row_group_index": candidate["row_group_index"],
+                "symbols_possible": candidate["symbols_possible"],
+                "columns": chunk_items,
+                "compressed_bytes_total": sum(item.get("compressed_size", 0) for item in chunk_items if item.get("valid")),
+                "all_ranges_valid": bool(chunk_items) and all(item.get("valid") for item in chunk_items),
+            })
+        planned_bytes = sum(item["compressed_bytes_total"] for item in candidate_chunk_plan)
+        planned_chunks = sum(len(item["columns"]) for item in candidate_chunk_plan)
+        plan_status = (
+            "WITHIN_BOUNDED_PLAN_CAP"
+            if candidate_chunk_plan and all(item["all_ranges_valid"] for item in candidate_chunk_plan)
+            and planned_bytes <= MAX_CANDIDATE_CHUNK_PLAN_BYTES
+            else "PLAN_CAP_EXCEEDED_OR_INVALID_RANGES"
+        )
         timestamp_stats_groups = sum(
             rg.get("timestamp_min_utc") is not None and rg.get("timestamp_max_utc") is not None
             for rg in row_groups
@@ -266,6 +321,16 @@ def _parse_footer_metadata(file_size, footer_range_data, footer_length, target_s
             "timestamp_column": timestamp_column,
             "row_groups": row_groups,
             "candidate_row_groups_for_target": candidate_groups,
+            "candidate_column_chunk_plan": candidate_chunk_plan,
+            "candidate_column_chunk_plan_summary": {
+                "selected_columns": selected_columns,
+                "candidate_group_count": len(candidate_chunk_plan),
+                "candidate_chunk_count": planned_chunks,
+                "compressed_bytes_total": planned_bytes,
+                "max_total_plan_bytes": MAX_CANDIDATE_CHUNK_PLAN_BYTES,
+                "max_single_column_chunk_bytes": MAX_CANDIDATE_COLUMN_CHUNK_BYTES,
+                "status": plan_status,
+            },
             "timestamp_stats_groups": timestamp_stats_groups,
             "timestamp_overlap_groups": timestamp_overlap_groups,
             "date_pruning_status": date_pruning_status,

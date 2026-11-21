@@ -6,7 +6,7 @@ import sys
 import types
 from datetime import datetime, timezone
 
-from market_intelligence.huggingface_parquet_range_probe import probe_parquet_footer_ranges
+from market_intelligence.huggingface_parquet_range_probe import probe_parquet_footer_ranges, _column_chunk_range
 
 
 class RangeResponse:
@@ -180,6 +180,34 @@ class HuggingFaceParquetRangeProbeTests(unittest.TestCase):
         self.assertEqual(result["files"][1]["status"], "TOTAL_FOOTER_BUDGET_EXCEEDED")
         self.assertEqual(session.get.call_count, 4)
 
+
+    def test_column_chunk_range_uses_dictionary_offset_and_respects_footer(self):
+        class Chunk:
+            dictionary_page_offset = 100
+            data_page_offset = 150
+            total_compressed_size = 80
+            total_uncompressed_size = 120
+            compression = "SNAPPY"
+        result = _column_chunk_range(Chunk(), file_size=1000, footer_start=900)
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["start_offset"],100)
+        self.assertEqual(result["end_exclusive"],180)
+        self.assertEqual(result["compressed_size"],80)
+        self.assertEqual(result["compression"],"SNAPPY")
+
+    def test_column_chunk_range_rejects_missing_offsets_and_footer_overlap(self):
+        class Missing:
+            dictionary_page_offset = -1
+            data_page_offset = -1
+            total_compressed_size = 100
+        self.assertFalse(_column_chunk_range(Missing(),1000,900)["valid"])
+        class Overlap:
+            dictionary_page_offset = 850
+            data_page_offset = 860
+            total_compressed_size = 100
+        result = _column_chunk_range(Overlap(),1000,900)
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["reason"],"range_overlaps_footer_or_exceeds_file")
 
 if __name__ == "__main__":
     unittest.main()
