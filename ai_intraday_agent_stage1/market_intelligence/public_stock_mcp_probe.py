@@ -101,7 +101,7 @@ def _symbol_records(payload):
     return []
 
 
-def summarize_tool_result(result, target_symbol="RELIANCE"):
+def summarize_tool_result(result, target_symbol="RELIANCE", target_date="2026-10-15"):
     structured = result.get("structuredContent") if isinstance(result, dict) else None
     content = result.get("content", []) if isinstance(result, dict) else []
     raw_text_items = [x.get("text", "") for x in content if x.get("type") == "text"]
@@ -143,7 +143,7 @@ def summarize_tool_result(result, target_symbol="RELIANCE"):
             "rows": record.get("rows"),
             "start": start,
             "end": end,
-            "target_date_within_reported_range": bool(start and end and start <= "2026-10-15" <= end),
+            "target_date_within_reported_range": bool(start and end and start <= str(target_date)[:10] <= end),
         })
     return {
         "is_error": bool(result.get("isError", False)) if isinstance(result, dict) else None,
@@ -254,7 +254,7 @@ def probe(directory,output,endpoint=ENDPOINT,session=None,day="2026-10-15"):
                 listed,sid,lss,lct=_rpc(session,endpoint,{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_symbols","arguments":lsargs}},sid,timeout=30)
                 lres=(listed or {}).get("result",{})
                 report["list_symbols_response"]={"http_status":lss,"content_type":lct,"jsonrpc_error":(listed or {}).get("error"),
-                    **summarize_tool_result(lres)}
+                    **summarize_tool_result(lres, target_symbol="RELIANCE", target_date=day)}
         if any(t.get("name")=="dataset_status" for t in tools):
             ds,sid,dss,dct=_rpc(session,endpoint,{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"dataset_status","arguments":{}}},sid)
             dres=(ds or {}).get("result",{})

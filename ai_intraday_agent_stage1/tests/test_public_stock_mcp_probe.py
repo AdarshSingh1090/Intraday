@@ -77,7 +77,7 @@ class PublicStockMCPProbeTests(unittest.TestCase):
         self.assertEqual(summary["reported_rows_total"],1034266)
         self.assertEqual(summary["reported_end_max"],"2026-04-08")
         self.assertEqual(summary["target_symbol_metadata"][0]["end"],"2026-04-08")
-        self.assertFalse(summary["target_symbol_metadata"][0]["target_date_within_reported_range"])
+        self.assertFalse(summary["target_symbol_metadata"][0]["target_date_within_reported_range"])\n        later=summarize_tool_result(result,target_date="2026-04-08")\n        self.assertTrue(later["target_symbol_metadata"][0]["target_date_within_reported_range"])
 
     def test_summarize_supports_structured_symbol_list_and_deduplicates(self):
         result={"structuredContent":{"symbols":[{"ticker":"RELIANCE.NS"},{"ticker":"TCS"},{"ticker":"RELIANCE.NS"}]},
