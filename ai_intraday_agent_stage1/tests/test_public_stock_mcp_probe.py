@@ -13,7 +13,7 @@ class PublicStockMCPProbeTests(unittest.TestCase):
     def test_parse_json_and_sse(self):
         class Resp:
             headers={"content-type":"text/event-stream"}
-            text='event: message\\ndata: {"jsonrpc":"2.0","id":2,"result":{"ok":true}}\\n\\n'
+            text='event: message\ndata: {"jsonrpc":"2.0","id":2,"result":{"ok":true}}\n\n'
             def json(self):return {"jsonrpc":"2.0","id":1}
         self.assertTrue(_parse_response(Resp())["result"]["ok"])
 
