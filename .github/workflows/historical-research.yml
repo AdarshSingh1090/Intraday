@@ -107,6 +107,18 @@ jobs:
             --symbols RELIANCE.NS,TCS.NS,INFY.NS,HDFCBANK.NS,ICICIBANK.NS,SBIN.NS,AXISBANK.NS,KOTAKBANK.NS,BHARTIARTL.NS,ITC.NS \
             --date 2026-10-15 \
             --output reports/nse_chart_probe.json
+      - name: Probe NSE chart API using corrected UTC epochs (recent sanity + target)
+        continue-on-error: true
+        env:
+          TZ: Asia/Kolkata
+        run: |
+          mkdir -p reports
+          python -m market_intelligence.nse_epoch_probe \
+            --directory data/research \
+            --symbol RELIANCE.NS \
+            --target-date 2026-10-15 \
+            --sanity-date 2026-11-19 \
+            --output reports/nse_epoch_probe.json
       - name: Compare yfinance history/download interfaces for recurring missing timestamps
         run: |
           mkdir -p reports
