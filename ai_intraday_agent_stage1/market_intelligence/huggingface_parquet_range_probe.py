@@ -157,6 +157,34 @@ def _column_chunk_range(column, file_size, footer_start):
     }
 
 
+def _summarize_candidate_chunk_plan(candidate_chunk_plan):
+    chunks = [chunk for group in candidate_chunk_plan for chunk in group.get("columns", [])]
+    total_bytes = sum(group.get("compressed_bytes_total", 0) for group in candidate_chunk_plan)
+    all_valid = bool(candidate_chunk_plan) and all(group.get("all_ranges_valid") for group in candidate_chunk_plan)
+    single_chunk_ok = all(
+        chunk.get("compressed_size", 0) <= MAX_CANDIDATE_COLUMN_CHUNK_BYTES
+        for chunk in chunks if chunk.get("valid")
+    ) and all(chunk.get("valid") for chunk in chunks)
+    if not candidate_chunk_plan:
+        status = "NO_CANDIDATE_CHUNKS"
+    elif not all_valid:
+        status = "INVALID_RANGE_PLAN"
+    elif not single_chunk_ok:
+        status = "SINGLE_CHUNK_CAP_EXCEEDED"
+    elif total_bytes > MAX_CANDIDATE_CHUNK_PLAN_BYTES:
+        status = "TOTAL_PLAN_CAP_EXCEEDED"
+    else:
+        status = "WITHIN_BOUNDED_PLAN_CAP"
+    return {
+        "candidate_group_count": len(candidate_chunk_plan),
+        "candidate_chunk_count": len(chunks),
+        "compressed_bytes_total": total_bytes,
+        "max_total_plan_bytes": MAX_CANDIDATE_CHUNK_PLAN_BYTES,
+        "max_single_column_chunk_bytes": MAX_CANDIDATE_COLUMN_CHUNK_BYTES,
+        "status": status,
+    }
+
+
 def _parse_footer_metadata(file_size, footer_range_data, footer_length, target_start, target_end, target_symbols):
     """Parse footer-only bytes from a sparse local file; never fetch row data."""
     if len(footer_range_data) != footer_length + 8:
@@ -290,14 +318,7 @@ def _parse_footer_metadata(file_size, footer_range_data, footer_length, target_s
                 "compressed_bytes_total": sum(item.get("compressed_size", 0) for item in chunk_items if item.get("valid")),
                 "all_ranges_valid": bool(chunk_items) and all(item.get("valid") for item in chunk_items),
             })
-        planned_bytes = sum(item["compressed_bytes_total"] for item in candidate_chunk_plan)
-        planned_chunks = sum(len(item["columns"]) for item in candidate_chunk_plan)
-        plan_status = (
-            "WITHIN_BOUNDED_PLAN_CAP"
-            if candidate_chunk_plan and all(item["all_ranges_valid"] for item in candidate_chunk_plan)
-            and planned_bytes <= MAX_CANDIDATE_CHUNK_PLAN_BYTES
-            else "PLAN_CAP_EXCEEDED_OR_INVALID_RANGES"
-        )
+        plan_summary = _summarize_candidate_chunk_plan(candidate_chunk_plan)
         timestamp_stats_groups = sum(
             rg.get("timestamp_min_utc") is not None and rg.get("timestamp_max_utc") is not None
             for rg in row_groups
@@ -324,12 +345,7 @@ def _parse_footer_metadata(file_size, footer_range_data, footer_length, target_s
             "candidate_column_chunk_plan": candidate_chunk_plan,
             "candidate_column_chunk_plan_summary": {
                 "selected_columns": selected_columns,
-                "candidate_group_count": len(candidate_chunk_plan),
-                "candidate_chunk_count": planned_chunks,
-                "compressed_bytes_total": planned_bytes,
-                "max_total_plan_bytes": MAX_CANDIDATE_CHUNK_PLAN_BYTES,
-                "max_single_column_chunk_bytes": MAX_CANDIDATE_COLUMN_CHUNK_BYTES,
-                "status": plan_status,
+                **plan_summary,
             },
             "timestamp_stats_groups": timestamp_stats_groups,
             "timestamp_overlap_groups": timestamp_overlap_groups,

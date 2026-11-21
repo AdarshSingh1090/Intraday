@@ -6,7 +6,7 @@ import sys
 import types
 from datetime import datetime, timezone
 
-from market_intelligence.huggingface_parquet_range_probe import probe_parquet_footer_ranges, _column_chunk_range
+from market_intelligence.huggingface_parquet_range_probe import probe_parquet_footer_ranges, _column_chunk_range, _summarize_candidate_chunk_plan, MAX_CANDIDATE_COLUMN_CHUNK_BYTES, MAX_CANDIDATE_CHUNK_PLAN_BYTES
 
 
 class RangeResponse:
@@ -208,6 +208,20 @@ class HuggingFaceParquetRangeProbeTests(unittest.TestCase):
         result = _column_chunk_range(Overlap(),1000,900)
         self.assertFalse(result["valid"])
         self.assertEqual(result["reason"],"range_overlaps_footer_or_exceeds_file")
+
+    def test_candidate_chunk_plan_caps_and_empty_status(self):
+        self.assertEqual(_summarize_candidate_chunk_plan([])["status"], "NO_CANDIDATE_CHUNKS")
+        valid = [{"columns":[{"valid":True,"compressed_size":100}],
+                  "compressed_bytes_total":100,"all_ranges_valid":True}]
+        self.assertEqual(_summarize_candidate_chunk_plan(valid)["status"], "WITHIN_BOUNDED_PLAN_CAP")
+        single = [{"columns":[{"valid":True,"compressed_size":MAX_CANDIDATE_COLUMN_CHUNK_BYTES+1}],
+                   "compressed_bytes_total":MAX_CANDIDATE_COLUMN_CHUNK_BYTES+1,"all_ranges_valid":True}]
+        self.assertEqual(_summarize_candidate_chunk_plan(single)["status"], "SINGLE_CHUNK_CAP_EXCEEDED")
+        total = [{"columns":[{"valid":True,"compressed_size":MAX_CANDIDATE_CHUNK_PLAN_BYTES//2+1}],
+                   "compressed_bytes_total":MAX_CANDIDATE_CHUNK_PLAN_BYTES//2+1,"all_ranges_valid":True},
+                  {"columns":[{"valid":True,"compressed_size":MAX_CANDIDATE_CHUNK_PLAN_BYTES//2+1}],
+                   "compressed_bytes_total":MAX_CANDIDATE_CHUNK_PLAN_BYTES//2+1,"all_ranges_valid":True}]
+        self.assertEqual(_summarize_candidate_chunk_plan(total)["status"], "TOTAL_PLAN_CAP_EXCEEDED")
 
 if __name__ == "__main__":
     unittest.main()
