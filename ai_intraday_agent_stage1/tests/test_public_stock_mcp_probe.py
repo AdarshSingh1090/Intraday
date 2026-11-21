@@ -1,4 +1,5 @@
 import unittest
+import json
 import pandas as pd
 from market_intelligence.public_stock_mcp_probe import build_candle_args,build_latest_candle_args,build_list_symbols_args,summarize_tool_result,normalize_rows,aggregate_five,_parse_response,_extract_rows
 
