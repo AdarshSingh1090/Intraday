@@ -15,6 +15,17 @@ from market_data.yahoo import YahooProvider
 
 from data_validation import validate
 from database.store import CandleStore
+from market_intelligence.quality_gate import assess_candles, print_quality_report
+from market_intelligence.evaluation import evaluate_market_data
+from market_intelligence.strategy import generate_setup, StrategyConfig
+from market_intelligence.risk import assess_candidate, RiskConfig
+from market_intelligence.paper_simulator import simulate_candidate, SimulationConfig, PaperTradeStore
+import json
+from market_intelligence.backtester import backtest, BacktestConfig
+from market_intelligence.experiment import run_chronological_experiment
+from market_intelligence.research_data import ResearchFetchConfig, fetch_multi_symbol_research_data
+from market_intelligence.completeness import audit_research_directory
+from market_intelligence.strategy_diagnostics import diagnose_directory
 
 
 # =========================================================
@@ -227,6 +238,100 @@ def cmd_yahoo_history(args):
 
 
 # =========================================================
+# STAGE 8: MULTI-SYMBOL RESEARCH DATA
+# =========================================================
+
+def cmd_fetch_research_data(args):
+    symbols = [item.strip().upper() for item in args.symbols.split(",") if item.strip()]
+    report = fetch_multi_symbol_research_data(
+        symbols,
+        ResearchFetchConfig(
+            interval_minutes=args.interval,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            market_timezone=args.market_timezone,
+        ),
+        args.output_dir,
+    )
+    print("\nSTAGE 8 HISTORICAL DATA FETCH")
+    print("=" * 60)
+    for symbol, result in report["results"].items():
+        print(f"{symbol}: {result['status']}")
+        if result.get("file"):
+            audit = result["audit"]
+            print(f"  rows={audit['rows']} coverage={audit.get('coverage', {})}")
+        if result.get("error"):
+            print(f"  error: {result['error']}")
+        if result.get("audit", {}).get("issues"):
+            for issue in result["audit"]["issues"]:
+                print(f"  audit: {issue}")
+    print(f"Manifest: {report['manifest_file']}")
+    print(f"Saved: {len(report['successful_symbols'])}/{len(symbols)} symbols")
+    print("Research-only | No broker execution")
+    if not report["successful_symbols"]:
+        raise SystemExit(2)
+    if report["failed_or_rejected_symbols"]:
+        raise SystemExit(1)
+
+
+
+
+# =========================================================
+# STAGE 8.1: DATASET COMPLETENESS AUDIT
+# =========================================================
+
+def cmd_audit_research_data(args):
+    report = audit_research_directory(
+        args.directory,
+        interval_minutes=args.interval,
+        reference_symbol=args.reference,
+        session_start=args.session_start,
+        session_end=args.session_end,
+        post_session_end=args.post_session_end,
+    )
+    print("\\nSTAGE 8.1 DATASET COMPLETENESS AUDIT")
+    print("=" * 60)
+    for symbol, details in report.get("symbols", {}).items():
+        audit = details["completeness"]
+        print(f"{symbol}: rows={details['rows']} dates={audit['observed_dates']} missing={audit['missing_bars']} eligible={audit['eligible']}")
+        for issue in audit.get("issues", []):
+            print(f"  - {issue}")
+    if report.get("synchronization"):
+        print(f"Reference: {report['reference_symbol']}")
+        for symbol, details in report["synchronization"].items():
+            print(f"  {symbol}: missing-reference={details['missing_reference_timestamps']} extra={details['extra_timestamps_vs_reference']}")
+    print(f"Report: {report['report_file']}")
+    print("Calendar limitation: no whole-session/holiday inference")
+    print("Research-only | No broker execution")
+    if not report.get("eligible"):
+        raise SystemExit(1)
+
+
+def cmd_strategy_diagnostics(args):
+    report = diagnose_directory(args.directory, session_start=args.session_start, session_end=args.session_end, post_session_end=args.post_session_end)
+    print("\nSTAGE 8.2 STRATEGY FILTER DIAGNOSTICS")
+    print("=" * 72)
+    aggregate = report["aggregate"]
+    print(f"Directional observations: {aggregate['directional_observations']}")
+    print("Aggregate filter pass rates (bottleneck first):")
+    for name in aggregate["bottleneck_filters_lowest_pass_rate_first"]:
+        item = aggregate["filter_summary"][name]
+        rate = item["pass_rate_pct"]
+        print(f"  {name}: {item['passed']}/{item['tested']} ({rate if rate is not None else 'n/a'}%)")
+    print("\nScenario pass counts by symbol:")
+    for symbol, details in report["symbols"].items():
+        print(f"  {symbol}: directional={details['directional_observations']}")
+        for scenario, item in details["scenarios"].items():
+            print(f"    {scenario}: {item['passing_observations']}")
+    print("No configuration selected. Diagnostics only; paper-only; no broker execution.")
+    if args.report_json:
+        out = Path(args.report_json)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(report, indent=2, default=str, allow_nan=False), encoding="utf-8")
+        print(f"Report JSON saved: {out}")
+
+
+# =========================================================
 # CSV IMPORT
 # =========================================================
 
@@ -273,6 +378,320 @@ def cmd_quality(args):
     )
 
     print_report(report)
+
+
+# =========================================================
+# NEW QUALITY GATE
+# =========================================================
+
+def cmd_quality_gate(args):
+    store = CandleStore(str(DB))
+    df = store.read(args.symbol, args.interval)
+    if df.empty:
+        print(f"No data found for {args.symbol} at {args.interval}-minute interval.")
+        return
+    report = assess_candles(
+        df,
+        interval_minutes=args.interval,
+        config=None
+    )
+    print_quality_report(report)
+    if args.require_eligible and not report["trade_eligible"]:
+        raise SystemExit(2)
+
+
+# =========================================================
+# INTEGRATED EVALUATION
+# =========================================================
+
+def cmd_evaluate(args):
+    store = CandleStore(str(DB))
+    df = store.read(args.symbol, args.interval)
+    if df.empty:
+        print(f"No data found for {args.symbol} at {args.interval}-minute interval.")
+        return
+    result = evaluate_market_data(df, interval_minutes=args.interval, symbol=args.symbol)
+    print("\n" + "=" * 58)
+    print("       DATA-GATED MARKET EVALUATION")
+    print("=" * 58)
+    print(f"Symbol: {args.symbol}")
+    print(f"Interval: {args.interval} minute(s)")
+    print(f"Status: {result['status']}")
+    print(f"Trade eligible for strategy: {'YES' if result['trade_eligible'] else 'NO'}")
+    print(f"Quality score: {result['quality']['quality_score']}/100")
+    if result['blocking_reasons']:
+        print("\nBlocking reasons:")
+        for reason in result['blocking_reasons']:
+            print(f"- {reason}")
+    if result.get('technical_analysis') and result['technical_analysis'].get('regime'):
+        regime = result['technical_analysis']['regime']
+        print("\nMarket regime:")
+        for key in ('trend', 'trend_strength', 'momentum', 'volatility'):
+            if key in regime:
+                print(f"{key}: {regime[key]}")
+    if result.get('screening') and result['screening'].get('metrics'):
+        print("\nScreening metrics:")
+        for key, value in result['screening']['metrics'].items():
+            print(f"{key}: {value}")
+    print("\\n" + result.get('warning', ''))
+    print("=" * 58)
+    if args.require_eligible and not result['trade_eligible']:
+        raise SystemExit(2)
+
+
+# =========================================================
+# STRATEGY EVALUATION (PAPER CANDIDATE ONLY)
+# =========================================================
+
+def cmd_strategy(args):
+    store = CandleStore(str(DB))
+    df = store.read(args.symbol, args.interval)
+    if df.empty:
+        print(f"No data found for {args.symbol} at {args.interval}-minute interval.")
+        return
+    evaluation = evaluate_market_data(df, interval_minutes=args.interval, symbol=args.symbol)
+    setup = generate_setup(evaluation, StrategyConfig(allow_short=not args.long_only))
+    print("\n" + "=" * 58)
+    print("        PAPER STRATEGY CANDIDATE")
+    print("=" * 58)
+    print(f"Symbol: {args.symbol}")
+    print(f"Interval: {args.interval} minute(s)")
+    print(f"Status: {setup['status']}")
+    print(f"Signal: {setup['signal']}")
+    print(f"Score: {setup['score']}/{setup['score_max']}")
+    print(f"Confidence (rule score): {setup['confidence']}%")
+    for reason in setup['reasons']:
+        print(f"+ {reason}")
+    if setup['candidate']:
+        print("\nCandidate (NOT an order):")
+        for key, value in setup['candidate'].items():
+            print(f"{key}: {value}")
+    if setup['diagnostics'].get('failed_checks'):
+        print("\nFailed checks:")
+        for reason in setup['diagnostics']['failed_checks']:
+            print(f"- {reason}")
+    if setup['status'] == 'BLOCKED':
+        print("\nBlocking reasons:")
+        for reason in setup['reasons']:
+            print(f"- {reason}")
+    print("\nPaper-only: YES | Execution: NONE")
+    print("=" * 58)
+    if args.require_candidate and setup['status'] != 'CANDIDATE':
+        raise SystemExit(2)
+
+
+# =========================================================
+# RISK CHECK (PAPER POSITION SIZE ONLY)
+# =========================================================
+
+def cmd_risk(args):
+    store = CandleStore(str(DB))
+    df = store.read(args.symbol, args.interval)
+    if df.empty:
+        print(f"No data found for {args.symbol} at {args.interval}-minute interval.")
+        return
+    evaluation = evaluate_market_data(df, interval_minutes=args.interval, symbol=args.symbol)
+    setup = generate_setup(evaluation, StrategyConfig(allow_short=not args.long_only))
+    risk = assess_candidate(
+        setup.get("candidate"),
+        RiskConfig(budget=args.budget),
+        open_exposure=args.open_exposure,
+        daily_pnl=args.daily_pnl,
+        trades_today=args.trades_today,
+    )
+    print("\n" + "=" * 58)
+    print("       PAPER RISK & POSITION SIZING")
+    print("=" * 58)
+    print(f"Symbol: {args.symbol}")
+    print(f"Strategy status: {setup['status']}")
+    print(f"Strategy signal: {setup['signal']}")
+    print(f"Risk status: {risk['status']}")
+    for key in ("quantity", "capital_required", "capital_pct_of_budget",
+                "total_risk", "risk_pct_of_budget", "risk_budget",
+                "reward_risk_ratio", "daily_loss_limit"):
+        if key in risk:
+            print(f"{key}: {risk[key]}")
+    for reason in risk.get("reasons", []):
+        print(f"- {reason}")
+    print("Paper-only: YES | Execution: NONE")
+    print("=" * 58)
+    if args.require_approved and not risk["approved"]:
+        raise SystemExit(2)
+
+
+# =========================================================
+# CHRONOLOGICAL RESEARCH EXPERIMENT
+# =========================================================
+
+def cmd_research(args):
+    historical = pd.read_csv(args.file)
+    def config_factory(start_date, end_date):
+        return BacktestConfig(
+            interval_minutes=args.interval,
+            warmup_bars=args.warmup_bars,
+            budget=args.budget,
+            max_trades_per_day=args.max_trades_per_day,
+            daily_loss_limit_pct=args.daily_loss_limit_pct,
+            risk_per_trade_pct=args.risk_per_trade_pct,
+            max_capital_per_trade_pct=args.max_capital_per_trade_pct,
+            max_portfolio_exposure_pct=args.max_portfolio_exposure_pct,
+            slippage_bps_per_side=args.slippage_bps,
+            fee_rate_per_side=args.fee_rate,
+            flat_fee_per_side=args.flat_fee,
+            long_only=args.long_only,
+            start_date=start_date,
+            end_date=end_date,
+            market_timezone=args.market_timezone,
+            session_start=args.session_start,
+            session_end=args.session_end,
+        )
+    report=run_chronological_experiment(
+        historical, backtest, config_factory, symbol=args.symbol,
+        train_fraction=args.train_fraction,
+        validation_fraction=args.validation_fraction,
+    )
+    print("\n" + "=" * 68)
+    print("       CHRONOLOGICAL RESEARCH EXPERIMENT")
+    print("=" * 68)
+    print(f"Symbol: {args.symbol}")
+    print(f"Split dates: {report['splits']}")
+    for period,result in report["results"].items():
+        print(f"\n{period.upper()} ({result['date_range']}):")
+        metrics=result.get("metrics",{})
+        for key in ("trades","win_rate_pct","profit_factor","net_pnl",
+                    "expectancy_per_trade","total_return_pct","max_drawdown_pct"):
+            if key in metrics:
+                print(f"  {key}: {metrics[key]}")
+        backtest_result = result.get("result", {}) or {}
+        diagnostics = backtest_result.get("diagnostics", {}) or {}
+        if diagnostics:
+            print("  Backtest diagnostics:")
+            for key in ("evaluation_windows", "quality_blocked_windows", "candidate_setups",
+                        "risk_rejected", "simulation_rejected"):
+                print(f"    {key}: {diagnostics.get(key, 0)}")
+            for label, counter_key in (
+                ("quality blockers", "quality_blocking_reason_counts"),
+                ("setup rejection reasons", "setup_reason_counts"),
+                ("risk rejection reasons", "risk_rejection_reason_counts"),
+                ("simulation rejection reasons", "simulation_rejection_reason_counts"),
+            ):
+                counts = diagnostics.get(counter_key, {}) or {}
+                if counts:
+                    top = sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:5]
+                    print(f"    {label}: " + "; ".join(f"{reason} ({count})" for reason, count in top))
+    print("\nPaper-only: YES | Execution: NONE")
+    print("=" * 68)
+    if args.report_json:
+        out=Path(args.report_json)
+        out.parent.mkdir(parents=True,exist_ok=True)
+        out.write_text(json.dumps(report,indent=2,default=str,allow_nan=False),encoding="utf-8")
+        print(f"Experiment report saved: {out}")
+
+
+# =========================================================
+# HISTORICAL BACKTEST (RESEARCH ONLY)
+# =========================================================
+
+def cmd_backtest(args):
+    historical = pd.read_csv(args.file)
+    cfg = BacktestConfig(
+        interval_minutes=args.interval,
+        warmup_bars=args.warmup_bars,
+        budget=args.budget,
+        max_trades_per_day=args.max_trades_per_day,
+        daily_loss_limit_pct=args.daily_loss_limit_pct,
+        risk_per_trade_pct=args.risk_per_trade_pct,
+        max_capital_per_trade_pct=args.max_capital_per_trade_pct,
+        max_portfolio_exposure_pct=args.max_portfolio_exposure_pct,
+        slippage_bps_per_side=args.slippage_bps,
+        fee_rate_per_side=args.fee_rate,
+        flat_fee_per_side=args.flat_fee,
+        long_only=args.long_only,
+        start_date=args.start_date,
+        end_date=args.end_date,
+        market_timezone=args.market_timezone,
+        session_start=args.session_start,
+        session_end=args.session_end,
+    )
+    result = backtest(historical, symbol=args.symbol, config=cfg)
+    print("\n" + "=" * 68)
+    print("          HISTORICAL BACKTEST — RESEARCH / PAPER ONLY")
+    print("=" * 68)
+    print(f"Status: {result.get('status')}")
+    if result.get("reason"):
+        print(f"Reason: {result['reason']}")
+    print(f"Symbol: {args.symbol}")
+    metrics = result.get("metrics", {})
+    for key in ("trades", "win_rate_pct", "profit_factor", "gross_pnl",
+                "estimated_fees", "net_pnl", "expectancy_per_trade",
+                "total_return_pct", "ending_equity", "max_drawdown",
+                "max_drawdown_pct", "average_r_multiple_net",
+                "daily_sharpe_annualized", "daily_sortino_annualized"):
+        if key in metrics:
+            print(f"{key}: {metrics[key]}")
+    print(f"Skipped candidate setups: {len(result.get('skipped', []))}")
+    print("Paper-only: YES | Broker execution: NONE")
+    print("=" * 68)
+    if args.report_json:
+        out = Path(args.report_json)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(result, indent=2, default=str, allow_nan=False), encoding="utf-8")
+        print(f"Report JSON saved: {out}")
+    if args.trades_csv:
+        out = Path(args.trades_csv)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(result.get("trades", [])).to_csv(out, index=False)
+        print(f"Trades CSV saved: {out}")
+    if args.require_trades and not result.get("trades"):
+        raise SystemExit(2)
+
+
+# =========================================================
+# PAPER SIMULATION (NO EXECUTION)
+# =========================================================
+
+def cmd_paper_sim(args):
+    candidate_data = json.loads(Path(args.candidate_json).read_text(encoding="utf-8"))
+    if candidate_data.get("approved") is not True:
+        raise SystemExit("Refusing simulation: candidate JSON must contain approved=true from risk assessment.")
+    if candidate_data.get("quantity", 0) <= 0:
+        raise SystemExit("Refusing simulation: approved quantity must be positive.")
+    forward = pd.read_csv(args.forward_csv)
+    result = simulate_candidate(
+        candidate_data,
+        forward,
+        SimulationConfig(
+            slippage_bps_per_side=args.slippage_bps,
+            fee_rate_per_side=args.fee_rate,
+            flat_fee_per_side=args.flat_fee,
+        ),
+    )
+    print("\n" + "=" * 58)
+    print("            PAPER TRADE SIMULATION")
+    print("=" * 58)
+    for key in ("status", "symbol", "direction", "quantity", "entry_timestamp",
+                "entry_reference_price", "entry_fill_price", "stop_loss", "target",
+                "exit_timestamp", "exit_fill_price", "exit_reason", "gross_pnl",
+                "estimated_fees", "net_pnl", "return_on_entry_capital_pct"):
+        if key in result:
+            print(f"{key}: {result[key]}")
+    if result.get("status") == "SIMULATED" and not args.no_save:
+        trade_id = PaperTradeStore(str(DB)).save(result)
+        print(f"Saved paper trade record: #{trade_id}")
+    if result.get("cost_model_note"):
+        print(result["cost_model_note"])
+    print("PAPER ONLY | NO BROKER ORDERS")
+    print("=" * 58)
+
+
+def cmd_paper_trades(args):
+    trades = PaperTradeStore(str(DB)).read_all()
+    if trades.empty:
+        print("No paper simulation records yet.")
+        return
+    print(trades[["id", "symbol", "direction", "quantity", "entry_fill_price",
+                  "exit_fill_price", "exit_reason", "net_pnl"]].to_string(index=False))
+    print(f"Total simulated net P&L: {trades['net_pnl'].sum():.2f}")
 
 
 # =========================================================
@@ -527,6 +946,41 @@ def build_parser():
     )
 
     # -----------------------------------------------------
+    # STAGE 8: MULTI-SYMBOL HISTORICAL RESEARCH DATA
+    # -----------------------------------------------------
+
+    research_data = sub.add_parser("fetch-research-data")
+    research_data.add_argument("--symbols", required=True,
+                               help="Comma-separated Yahoo tickers, e.g. RELIANCE.NS,TCS.NS")
+    research_data.add_argument("--interval", type=int, choices=[1, 2, 5, 15, 30, 60], default=5)
+    research_data.add_argument("--start-date", required=True, help="Inclusive date (YYYY-MM-DD)")
+    research_data.add_argument("--end-date", required=True, help="Provider end-exclusive date (YYYY-MM-DD)")
+    research_data.add_argument("--output-dir", default="data/research")
+    research_data.add_argument("--market-timezone", default="Asia/Kolkata")
+    research_data.set_defaults(func=cmd_fetch_research_data)
+
+    research_audit = sub.add_parser("audit-research-data")
+    research_audit.add_argument("--directory", required=True, help="Directory containing per-symbol OHLCV CSVs.")
+    research_audit.add_argument("--interval", type=int, default=5)
+    research_audit.add_argument("--reference", help="Reference filename stem (e.g. RELIANCE.NS_5m). Defaults to the dataset with most rows.")
+    research_audit.add_argument("--session-start", default="09:15")
+    research_audit.add_argument("--session-end", default="15:30", help="Exclusive continuous-session end.")
+    research_audit.add_argument("--post-session-end", default="16:00", help="End of window used to classify post-session observations.")
+    research_audit.set_defaults(func=cmd_audit_research_data)
+
+    # -----------------------------------------------------
+    # STAGE 8.2: STRATEGY FILTER DIAGNOSTICS
+    # -----------------------------------------------------
+
+    diagnostics = sub.add_parser("strategy-diagnostics")
+    diagnostics.add_argument("--directory", required=True, help="Directory containing per-symbol historical OHLCV CSVs.")
+    diagnostics.add_argument("--session-start", default="09:15")
+    diagnostics.add_argument("--session-end", default="15:30", help="Exclusive continuous-session end.")
+    diagnostics.add_argument("--post-session-end", default="16:00")
+    diagnostics.add_argument("--report-json", help="Optional output path for the diagnostic report.")
+    diagnostics.set_defaults(func=cmd_strategy_diagnostics)
+
+    # -----------------------------------------------------
     # CSV IMPORT
     # -----------------------------------------------------
 
@@ -578,6 +1032,134 @@ def build_parser():
     q.set_defaults(
         func=cmd_quality
     )
+
+    # -----------------------------------------------------
+    # QUALITY GATE
+    # -----------------------------------------------------
+
+    qg = sub.add_parser("quality-gate")
+    qg.add_argument("--symbol", required=True)
+    qg.add_argument("--interval", type=int, required=True)
+    qg.add_argument("--require-eligible", action="store_true",
+                    help="Exit with code 2 when data is not trade eligible.")
+    qg.set_defaults(func=cmd_quality_gate)
+
+    # -----------------------------------------------------
+    # EVALUATE
+    # -----------------------------------------------------
+
+    ev = sub.add_parser("evaluate")
+    ev.add_argument("--symbol", required=True)
+    ev.add_argument("--interval", type=int, required=True)
+    ev.add_argument("--require-eligible", action="store_true",
+                    help="Exit with code 2 when quality gate blocks.")
+    ev.set_defaults(func=cmd_evaluate)
+
+    # -----------------------------------------------------
+    # STRATEGY
+    # -----------------------------------------------------
+
+    st = sub.add_parser("strategy")
+    st.add_argument("--symbol", required=True)
+    st.add_argument("--interval", type=int, required=True)
+    st.add_argument("--long-only", action="store_true",
+                    help="Disable short setup candidates.")
+    st.add_argument("--require-candidate", action="store_true",
+                    help="Exit with code 2 when no candidate is produced.")
+    st.set_defaults(func=cmd_strategy)
+
+    # -----------------------------------------------------
+    # RISK
+    # -----------------------------------------------------
+
+    rk = sub.add_parser("risk")
+    rk.add_argument("--symbol", required=True)
+    rk.add_argument("--interval", type=int, required=True)
+    rk.add_argument("--budget", type=float, default=8900.0)
+    rk.add_argument("--open-exposure", type=float, default=0.0,
+                    help="Current simulated open-position capital; not yet persisted.")
+    rk.add_argument("--daily-pnl", type=float, default=0.0,
+                    help="Current simulated daily P&L; not yet persisted.")
+    rk.add_argument("--trades-today", type=int, default=0,
+                    help="Current simulated trade count; not yet persisted.")
+    rk.add_argument("--long-only", action="store_true")
+    rk.add_argument("--require-approved", action="store_true")
+    rk.set_defaults(func=cmd_risk)
+
+    # -----------------------------------------------------
+    # CHRONOLOGICAL RESEARCH EXPERIMENT
+    # -----------------------------------------------------
+
+    research = sub.add_parser("research")
+    research.add_argument("--file", required=True, help="Historical OHLCV CSV.")
+    research.add_argument("--symbol", required=True)
+    research.add_argument("--interval", type=int, default=5)
+    research.add_argument("--warmup-bars", type=int, default=60)
+    research.add_argument("--budget", type=float, default=8900.0)
+    research.add_argument("--train-fraction", type=float, default=0.60)
+    research.add_argument("--validation-fraction", type=float, default=0.20)
+    research.add_argument("--max-trades-per-day", type=int, default=3)
+    research.add_argument("--daily-loss-limit-pct", type=float, default=2.0)
+    research.add_argument("--risk-per-trade-pct", type=float, default=0.5)
+    research.add_argument("--max-capital-per-trade-pct", type=float, default=35.0)
+    research.add_argument("--max-portfolio-exposure-pct", type=float, default=70.0)
+    research.add_argument("--slippage-bps", type=float, default=5.0)
+    research.add_argument("--fee-rate", type=float, default=0.0003)
+    research.add_argument("--flat-fee", type=float, default=0.0)
+    research.add_argument("--long-only", action="store_true")
+    research.add_argument("--market-timezone", default="Asia/Kolkata")
+    research.add_argument("--session-start", default="09:15")
+    research.add_argument("--session-end", default="15:30")
+    research.add_argument("--report-json", help="Optional path for full experiment report.")
+    research.set_defaults(func=cmd_research)
+
+    # -----------------------------------------------------
+    # HISTORICAL BACKTEST (RESEARCH ONLY)
+    # -----------------------------------------------------
+
+    bt = sub.add_parser("backtest")
+    bt.add_argument("--file", required=True, help="Historical OHLCV CSV.")
+    bt.add_argument("--symbol", required=True)
+    bt.add_argument("--interval", type=int, default=5)
+    bt.add_argument("--warmup-bars", type=int, default=60)
+    bt.add_argument("--budget", type=float, default=8900.0)
+    bt.add_argument("--max-trades-per-day", type=int, default=3)
+    bt.add_argument("--daily-loss-limit-pct", type=float, default=2.0)
+    bt.add_argument("--risk-per-trade-pct", type=float, default=0.5)
+    bt.add_argument("--max-capital-per-trade-pct", type=float, default=35.0)
+    bt.add_argument("--max-portfolio-exposure-pct", type=float, default=70.0)
+    bt.add_argument("--slippage-bps", type=float, default=5.0)
+    bt.add_argument("--fee-rate", type=float, default=0.0003)
+    bt.add_argument("--flat-fee", type=float, default=0.0)
+    bt.add_argument("--long-only", action="store_true")
+    bt.add_argument("--start-date", help="Inclusive signal date (YYYY-MM-DD); earlier bars remain available for warm-up.")
+    bt.add_argument("--end-date", help="Inclusive final signal/exit date (YYYY-MM-DD).")
+    bt.add_argument("--market-timezone", default="Asia/Kolkata")
+    bt.add_argument("--session-start", default="09:15")
+    bt.add_argument("--session-end", default="15:30", help="Exclusive session end.")
+    bt.add_argument("--report-json", help="Optional output path for complete JSON report.")
+    bt.add_argument("--trades-csv", help="Optional output path for simulated trades CSV.")
+    bt.add_argument("--require-trades", action="store_true", help="Exit with code 2 if no trades are produced.")
+    bt.set_defaults(func=cmd_backtest)
+
+    # -----------------------------------------------------
+    # PAPER SIMULATOR
+    # -----------------------------------------------------
+
+    ps = sub.add_parser("paper-sim")
+    ps.add_argument("--candidate-json", required=True,
+                    help="JSON containing approved risk assessment fields.")
+    ps.add_argument("--forward-csv", required=True,
+                    help="Forward candles with timestamp, open, high, low, close, volume.")
+    ps.add_argument("--slippage-bps", type=float, default=5.0)
+    ps.add_argument("--fee-rate", type=float, default=0.0003,
+                    help="Estimated fee rate per side.")
+    ps.add_argument("--flat-fee", type=float, default=0.0)
+    ps.add_argument("--no-save", action="store_true")
+    ps.set_defaults(func=cmd_paper_sim)
+
+    pt = sub.add_parser("paper-trades")
+    pt.set_defaults(func=cmd_paper_trades)
 
     # -----------------------------------------------------
     # STATUS

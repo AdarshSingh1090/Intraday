@@ -1,0 +1,287 @@
+"""Historical walk-forward backtesting. Research only; no broker execution."""
+from dataclasses import dataclass
+import math
+import pandas as pd
+
+from market_intelligence.performance import evaluate_performance, segment_performance
+from market_intelligence.benchmarks import benchmark_summary
+from market_intelligence.evaluation import evaluate_market_data
+from market_intelligence.strategy import generate_setup, StrategyConfig
+from market_intelligence.risk import assess_candidate, RiskConfig
+from market_intelligence.paper_simulator import simulate_candidate, SimulationConfig
+from market_intelligence.quality_gate import QualityConfig
+
+
+@dataclass(frozen=True)
+class BacktestConfig:
+    interval_minutes: int = 5
+    warmup_bars: int = 60
+    budget: float = 8900.0
+    max_trades_per_day: int = 3
+    daily_loss_limit_pct: float = 2.0
+    risk_per_trade_pct: float = 0.5
+    max_capital_per_trade_pct: float = 35.0
+    max_portfolio_exposure_pct: float = 70.0
+    slippage_bps_per_side: float = 5.0
+    fee_rate_per_side: float = 0.0003
+    flat_fee_per_side: float = 0.0
+    long_only: bool = False
+    start_date: str | None = None
+    end_date: str | None = None
+    market_timezone: str = "Asia/Kolkata"
+    session_start: str = "09:15"
+    session_end: str = "15:30"
+
+
+def _empty_metrics(starting_equity=0.0):
+    return {
+        "trades": 0, "wins": 0, "losses": 0, "win_rate_pct": 0.0,
+        "gross_pnl": 0.0, "estimated_fees": 0.0, "net_pnl": 0.0,
+        "profit_factor": 0.0, "average_win": 0.0, "average_loss": 0.0,
+        "max_drawdown": 0.0, "trades_per_day": 0.0,
+        "expectancy_per_trade": 0.0, "median_trade_pnl": 0.0,
+        "max_drawdown_pct": 0.0, "total_return_pct": 0.0,
+        "ending_equity": round(float(starting_equity), 2), "starting_equity": round(float(starting_equity), 2), "average_r_multiple_net": None,
+        "expectancy_bootstrap_95_ci": None,
+    }
+
+
+def calculate_metrics(trades, starting_equity=8900.0):
+    if not trades:
+        return _empty_metrics(starting_equity)
+    pnl = [float(t.get("net_pnl", 0.0)) for t in trades]
+    wins = [x for x in pnl if x > 0]
+    losses = [x for x in pnl if x < 0]
+    gross_profit, gross_loss = sum(wins), abs(sum(losses))
+    equity = peak = 0.0
+    max_dd = 0.0
+    for value in pnl:
+        equity += value
+        peak = max(peak, equity)
+        max_dd = max(max_dd, peak - equity)
+    days = {str(t.get("entry_timestamp", ""))[:10] for t in trades}
+    advanced = evaluate_performance(trades, starting_equity=starting_equity)
+    return {
+        "trades": len(pnl), "wins": len(wins), "losses": len(losses),
+        "win_rate_pct": round(len(wins) / len(pnl) * 100, 2),
+        "gross_pnl": round(sum(float(t.get("gross_pnl", 0)) for t in trades), 2),
+        "estimated_fees": round(sum(float(t.get("estimated_fees", 0)) for t in trades), 2),
+        "net_pnl": round(sum(pnl), 2),
+        "profit_factor": round(gross_profit / gross_loss, 3) if gross_loss else None,
+        "average_win": round(sum(wins) / len(wins), 2) if wins else 0.0,
+        "average_loss": round(sum(losses) / len(losses), 2) if losses else 0.0,
+        "max_drawdown": round(max_dd, 2),
+        "trades_per_day": round(len(pnl) / max(1, len(days)), 2),
+        "expectancy_per_trade": advanced["expectancy_per_trade"],
+        "median_trade_pnl": advanced["median_trade_pnl"],
+        "max_drawdown_pct": advanced["max_drawdown_pct"],
+        "total_return_pct": advanced["total_return_pct"],
+        "ending_equity": advanced["ending_equity"],
+        "average_r_multiple_net": advanced["average_r_multiple_net"],
+        "daily_sharpe_annualized": advanced["daily_sharpe_annualized"],
+        "daily_sortino_annualized": advanced["daily_sortino_annualized"],
+        "calmar_ratio_approx": advanced["calmar_ratio_approx"],
+        "expectancy_bootstrap_95_ci": advanced["expectancy_bootstrap_95_ci"],
+        "daily_net_pnl": advanced["daily_net_pnl"],
+        "equity_curve": advanced["equity_curve"],
+        "warnings": advanced["warnings"],
+    }
+
+
+def backtest(df, symbol="UNKNOWN", config=None, strategy_config=None):
+    """Walk forward: signal uses bars through t; fill/simulation uses t+1 onward."""
+    config = config or BacktestConfig()
+    try:
+        budget = float(config.budget)
+        numeric_costs = [float(config.slippage_bps_per_side), float(config.fee_rate_per_side), float(config.flat_fee_per_side)]
+        numeric_limits = [float(config.risk_per_trade_pct), float(config.max_capital_per_trade_pct),
+                          float(config.max_portfolio_exposure_pct), float(config.daily_loss_limit_pct)]
+        valid_config = (
+            isinstance(config.interval_minutes, int) and config.interval_minutes > 0
+            and isinstance(config.warmup_bars, int) and config.warmup_bars >= 1
+            and math.isfinite(budget) and budget > 0
+            and all(math.isfinite(x) and 0 < x <= 100 for x in numeric_limits)
+            and isinstance(config.max_trades_per_day, int) and config.max_trades_per_day >= 1
+            and all(math.isfinite(x) and x >= 0 for x in numeric_costs)
+            and bool(config.market_timezone)
+            and pd.to_datetime("2000-01-01 " + config.session_start) < pd.to_datetime("2000-01-01 " + config.session_end)
+        )
+    except (TypeError, ValueError, OverflowError):
+        valid_config = False
+        budget = 0.0
+    if not valid_config:
+        return {"status": "REJECTED", "reason": "Invalid backtest configuration.", "trades": [], "metrics": _empty_metrics(budget), "paper_only": True}
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return {"status": "REJECTED", "reason": "No historical candles provided.", "trades": [], "metrics": _empty_metrics(config.budget), "paper_only": True}
+    required = {"timestamp", "open", "high", "low", "close", "volume"}
+    if not required.issubset(df.columns):
+        return {"status": "REJECTED", "reason": "Historical data missing required OHLCV columns.", "trades": [], "metrics": _empty_metrics(config.budget), "paper_only": True}
+    bars = df.copy()
+    bars["timestamp"] = pd.to_datetime(bars["timestamp"], errors="coerce")
+    try:
+        if bars["timestamp"].dt.tz is None:
+            bars["timestamp"] = bars["timestamp"].dt.tz_localize(config.market_timezone)
+        else:
+            bars["timestamp"] = bars["timestamp"].dt.tz_convert(config.market_timezone)
+    except (TypeError, ValueError):
+        return {"status": "REJECTED", "reason": "Historical timestamps could not be normalized to configured market timezone.", "trades": [], "metrics": _empty_metrics(config.budget), "paper_only": True}
+    for col in ("open", "high", "low", "close", "volume"):
+        bars[col] = pd.to_numeric(bars[col], errors="coerce")
+    if bars[list(required)].isna().any().any():
+        return {"status": "REJECTED", "reason": "Historical candles contain invalid timestamps or missing/non-numeric OHLCV values.", "trades": [], "metrics": _empty_metrics(config.budget), "paper_only": True}
+    if bars["timestamp"].duplicated().any():
+        return {"status": "REJECTED", "reason": "Historical candles contain duplicate timestamps.", "trades": [], "metrics": _empty_metrics(config.budget), "paper_only": True}
+    bars = bars.sort_values("timestamp").reset_index(drop=True)
+    session_start = pd.to_datetime(config.session_start).time()
+    session_end = pd.to_datetime(config.session_end).time()
+    in_session = bars["timestamp"].dt.time.map(lambda t: session_start <= t < session_end)
+    excluded_out_of_session = int((~in_session).sum())
+    bars = bars.loc[in_session].reset_index(drop=True)
+    if bars.empty:
+        return {"status": "REJECTED", "reason": "No candles remain inside configured regular market session.", "trades": [], "metrics": _empty_metrics(config.budget), "paper_only": True}
+    o, h, l, cl = (bars[col] for col in ("open", "high", "low", "close"))
+    invalid_ohlc = (h < bars[["open", "close", "low"]].max(axis=1)) | (l > bars[["open", "close"]].min(axis=1))
+    if invalid_ohlc.any():
+        return {"status": "REJECTED", "reason": "Historical candles contain inconsistent OHLC relationships.", "trades": [], "metrics": _empty_metrics(config.budget), "paper_only": True}
+    if len(bars) <= config.warmup_bars + 1:
+        return {"status": "REJECTED", "reason": "Insufficient candles for warm-up and forward simulation.", "trades": [], "metrics": _empty_metrics(config.budget), "paper_only": True}
+    if (bars[["open", "high", "low", "close"]] <= 0).any().any() or (bars["volume"] < 0).any():
+        return {"status": "REJECTED", "reason": "Historical candles contain invalid prices or negative volume.", "trades": [], "metrics": _empty_metrics(config.budget), "paper_only": True}
+
+    try:
+        start_day = pd.to_datetime(config.start_date).date() if config.start_date else None
+        end_day = pd.to_datetime(config.end_date).date() if config.end_date else None
+        if start_day and end_day and start_day > end_day:
+            raise ValueError("start_date is after end_date")
+    except (TypeError, ValueError):
+        return {"status": "REJECTED", "reason": "Invalid backtest date range.", "trades": [], "metrics": _empty_metrics(config.budget), "paper_only": True}
+    trades, skipped = [], []
+    daily_pnl, daily_count = {}, {}
+    diagnostics = {
+        "evaluation_windows": 0,
+        "quality_blocked_windows": 0,
+        "quality_blocking_reason_counts": {},
+        "setup_status_counts": {},
+        "setup_reason_counts": {},
+        "candidate_setups": 0,
+        "risk_rejected": 0,
+        "risk_rejection_reason_counts": {},
+        "simulation_rejected": 0,
+        "simulation_rejection_reason_counts": {},
+    }
+    i = config.warmup_bars
+    sim_config = SimulationConfig(config.slippage_bps_per_side, config.fee_rate_per_side, config.flat_fee_per_side, config.market_timezone)
+    strat_config = strategy_config or StrategyConfig(allow_short=not config.long_only)
+    while i < len(bars) - 1:
+        signal_bar = bars.iloc[i]
+        signal_day = signal_bar["timestamp"].date()
+        if start_day and signal_day < start_day:
+            i += 1
+            continue
+        if end_day and signal_day > end_day:
+            break
+        day = signal_day.isoformat()
+        pnl_today = daily_pnl.get(day, 0.0)
+        count_today = daily_count.get(day, 0)
+        # Prevent crossing session boundaries in forward simulations.
+        forward = bars.iloc[i+1:].copy()
+        forward = forward[forward["timestamp"].dt.date == signal_day]
+        if end_day:
+            forward = forward[forward["timestamp"].dt.date <= end_day]
+        if forward.empty:
+            i += 1
+            continue
+        # Historical freshness is anchored to the signal candle, not wall-clock now.
+        window = bars.iloc[:i+1].copy()
+        quality_cfg = QualityConfig(freshness_minutes=10**9, recent_window=min(20, len(window)), minimum_recent_quality=0.0)
+        evaluation = evaluate_market_data(window, interval_minutes=config.interval_minutes, now=signal_bar["timestamp"], quality_config=quality_cfg, symbol=symbol)
+        diagnostics["evaluation_windows"] += 1
+        if not evaluation.get("trade_eligible", False):
+            diagnostics["quality_blocked_windows"] += 1
+            for reason in evaluation.get("blocking_reasons", []) or []:
+                key = str(reason)
+                diagnostics["quality_blocking_reason_counts"][key] = diagnostics["quality_blocking_reason_counts"].get(key, 0) + 1
+        setup = generate_setup(evaluation, strat_config)
+        setup_status = str(setup.get("status", "UNKNOWN"))
+        diagnostics["setup_status_counts"][setup_status] = diagnostics["setup_status_counts"].get(setup_status, 0) + 1
+        for reason in setup.get("reasons", []) or []:
+            key = str(reason)
+            diagnostics["setup_reason_counts"][key] = diagnostics["setup_reason_counts"].get(key, 0) + 1
+        setup_details = setup.get("diagnostics", {}) or {}
+        for reason in setup_details.get("failed_checks", []) or setup_details.get("hard_filter_failures", []) or []:
+            key = str(reason)
+            diagnostics["setup_reason_counts"][key] = diagnostics["setup_reason_counts"].get(key, 0) + 1
+        if setup_status != "CANDIDATE":
+            i += 1
+            continue
+        diagnostics["candidate_setups"] += 1
+        risk_cfg = RiskConfig(
+            budget=config.budget,
+            risk_per_trade_pct=config.risk_per_trade_pct,
+            max_capital_per_trade_pct=config.max_capital_per_trade_pct,
+            max_portfolio_exposure_pct=config.max_portfolio_exposure_pct,
+            max_daily_loss_pct=config.daily_loss_limit_pct,
+            max_trades_per_day=config.max_trades_per_day,
+        )
+        risk = assess_candidate(setup["candidate"], risk_cfg, open_exposure=0, daily_pnl=pnl_today, trades_today=count_today)
+        if not risk.get("approved"):
+            diagnostics["risk_rejected"] += 1
+            for reason in risk.get("reasons", []) or []:
+                key = str(reason)
+                diagnostics["risk_rejection_reason_counts"][key] = diagnostics["risk_rejection_reason_counts"].get(key, 0) + 1
+            skipped.append({"timestamp": str(signal_bar["timestamp"]), "reason": risk.get("reasons", [])})
+            i += 1
+            continue
+        approved = dict(setup["candidate"])
+        approved.update({k: risk[k] for k in ("quantity", "risk_budget") if k in risk})
+        approved["max_capital"] = config.budget * config.max_capital_per_trade_pct / 100
+        approved["minimum_reward_risk_ratio"] = risk_cfg.minimum_reward_risk_ratio
+        approved["approved"] = True
+        sim = simulate_candidate(approved, forward, sim_config)
+        if sim.get("status") != "SIMULATED":
+            diagnostics["simulation_rejected"] += 1
+            reason = str(sim.get("reason", "simulation rejected"))
+            diagnostics["simulation_rejection_reason_counts"][reason] = diagnostics["simulation_rejection_reason_counts"].get(reason, 0) + 1
+            skipped.append({"timestamp": str(signal_bar["timestamp"]), "reason": sim.get("reason", "simulation rejected")})
+            i += 1
+            continue
+        trades.append(sim)
+        daily_pnl[day] = pnl_today + float(sim["net_pnl"])
+        daily_count[day] = count_today + 1
+        # Resume after the exit candle; never allow overlapping positions.
+        exit_ts = pd.to_datetime(sim["exit_timestamp"], errors="coerce")
+        exit_idx = bars.index[bars["timestamp"] == exit_ts]
+        i = max(i + 1, int(exit_idx[0]) + 1) if len(exit_idx) else i + 1
+
+    benchmark_bars = bars.copy()
+    benchmark_start_day = start_day or bars.iloc[config.warmup_bars]["timestamp"].date()
+    benchmark_bars = benchmark_bars[benchmark_bars["timestamp"].dt.date >= benchmark_start_day]
+    if end_day:
+        benchmark_bars = benchmark_bars[benchmark_bars["timestamp"].dt.date <= end_day]
+    benchmarks = benchmark_summary(
+        benchmark_bars, starting_equity=config.budget,
+        slippage_bps=config.slippage_bps_per_side,
+        fee_rate=config.fee_rate_per_side, flat_fee=config.flat_fee_per_side,
+    )
+    return {
+        "status": "COMPLETED",
+        "symbol": symbol,
+        "config": config.__dict__,
+        "trades": trades,
+        "skipped": skipped,
+        "diagnostics": diagnostics,
+        "metrics": calculate_metrics(trades, starting_equity=config.budget),
+        "segments": segment_performance(
+            trades, group_by=("symbol", "direction", "exit_reason", "trend",
+                              "trend_strength", "volatility", "entry_time_bucket",
+                              "entry_month", "entry_weekday"),
+            starting_equity=config.budget, bootstrap_iterations=0,
+        ),
+        "benchmarks": benchmarks,
+        "excluded_out_of_session_bars": excluded_out_of_session,
+        "market_timezone": config.market_timezone,
+        "session": {"start": config.session_start, "end_exclusive": config.session_end},
+        "paper_only": True,
+        "execution": "none",
+        "disclaimer": "Historical simulation only. Results are not predictive; estimated costs and candle-based fills may differ from real execution.",
+    }

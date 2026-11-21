@@ -1,0 +1,264 @@
+name: Historical Research Data & First Experiments
+
+on:
+  push:
+    branches:
+      - stage8-multi-stock-research
+    paths:
+      - "ai_intraday_agent_stage1/market_intelligence/**"
+      - "ai_intraday_agent_stage1/main.py"
+      - ".github/workflows/historical-research.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: stage8-historical-research-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  collect-and-research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: ai_intraday_agent_stage1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install project dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          # yfinance's optional repair=True path requires scipy.
+          pip install scipy scikit-learn openchart pyarrow
+      - name: Set Yahoo intraday-compatible date window
+        id: dates
+        run: |
+          END_DATE=$(date -u +%Y-%m-%d)
+          START_DATE=$(date -u -d "45 days ago" +%Y-%m-%d)
+          echo "start=$START_DATE" >> "$GITHUB_OUTPUT"
+          echo "end=$END_DATE" >> "$GITHUB_OUTPUT"
+          echo "Collecting 5-minute data from $START_DATE through (exclusive) $END_DATE"
+      - name: Download research basket
+        run: |
+          python main.py fetch-research-data \
+            --symbols RELIANCE.NS,TCS.NS,INFY.NS,HDFCBANK.NS,ICICIBANK.NS,SBIN.NS,AXISBANK.NS,KOTAKBANK.NS,BHARTIARTL.NS,ITC.NS \
+            --interval 5 \
+            --start-date "${{ steps.dates.outputs.start }}" \
+            --end-date "${{ steps.dates.outputs.end }}" \
+            --output-dir data/research
+      - name: Probe missing candles through Yahoo direct Chart API endpoints
+        continue-on-error: true
+        run: |
+          mkdir -p reports
+          python -m market_intelligence.yahoo_gap_probe \
+            --directory data/research \
+            --symbols RELIANCE.NS,TCS.NS,INFY.NS,HDFCBANK.NS,ICICIBANK.NS,SBIN.NS,AXISBANK.NS,KOTAKBANK.NS,BHARTIARTL.NS,ITC.NS \
+            --session-end 15:15 \
+            --output reports/yahoo_gap_probe.json \
+            --openchart-output reports/openchart_gap_probe.json
+      - name: Probe alternate Yahoo intervals for exact 5-minute recovery candidates
+        continue-on-error: true
+        run: |
+          mkdir -p reports
+          python -m market_intelligence.yahoo_interval_probe \
+            --directory data/research \
+            --symbols RELIANCE.NS,TCS.NS,INFY.NS,HDFCBANK.NS,ICICIBANK.NS,SBIN.NS,AXISBANK.NS,KOTAKBANK.NS,BHARTIARTL.NS,ITC.NS \
+            --session-end 15:15 \
+            --output reports/yahoo_alternate_interval_probe.json
+      - name: Diagnose Hugging Face Dataset Viewer endpoints and metadata-only Parquet manifest
+        continue-on-error: true
+        run: |
+          mkdir -p reports
+          python -m market_intelligence.huggingface_api_diagnostics \
+            --output reports/huggingface_api_diagnostics.json
+      - name: Probe bounded Parquet footer byte ranges (metadata only)
+        continue-on-error: true
+        run: |
+          mkdir -p reports
+          python -m market_intelligence.huggingface_parquet_range_probe \
+            --max-files 11 \
+            --output reports/huggingface_parquet_range_probe.json
+      - name: Probe bounded Parquet candidate column chunks (RELIANCE only)
+        continue-on-error: true
+        run: |
+          mkdir -p reports
+          python -m market_intelligence.huggingface_parquet_candidate_probe \
+            --report reports/huggingface_parquet_range_probe.json \
+            --symbol RELIANCE.NS \
+            --max-row-data-bytes 16777216 \
+            --max-column-chunk-bytes 8388608 \
+            --output reports/huggingface_parquet_candidate_probe.json
+      - name: Probe public Hugging Face 1-minute dataset for exact recovery candidates
+        continue-on-error: true
+        run: |
+          mkdir -p reports
+          python -m market_intelligence.huggingface_minute_probe \
+            --directory data/research \
+            --symbols RELIANCE.NS,TCS.NS,INFY.NS,HDFCBANK.NS,ICICIBANK.NS,SBIN.NS,AXISBANK.NS,KOTAKBANK.NS,BHARTIARTL.NS,ITC.NS \
+            --session-end 15:15 \
+            --output reports/huggingface_minute_probe.json
+      - name: Install free NSE chart probe dependency
+        continue-on-error: true
+        run: |
+          pip install nsemine==2.2.1
+      - name: Probe public NSE historical chart API (no auth)
+        continue-on-error: true
+        env:
+          TZ: Asia/Kolkata
+        run: |
+          mkdir -p reports
+          python -m market_intelligence.nse_chart_probe \
+            --directory data/research \
+            --symbols RELIANCE.NS,TCS.NS,INFY.NS,HDFCBANK.NS,ICICIBANK.NS,SBIN.NS,AXISBANK.NS,KOTAKBANK.NS,BHARTIARTL.NS,ITC.NS \
+            --date 2026-10-15 \
+            --output reports/nse_chart_probe.json
+      - name: Probe NSE chart API using corrected UTC epochs (recent sanity + target)
+        continue-on-error: true
+        env:
+          TZ: Asia/Kolkata
+        run: |
+          mkdir -p reports
+          python -m market_intelligence.nse_epoch_probe \
+            --directory data/research \
+            --symbol RELIANCE.NS \
+            --target-date 2026-10-15 \
+            --sanity-date 2026-11-19 \
+            --output reports/nse_epoch_probe.json
+      - name: Probe public hosted Kaggle-backed stock-candle MCP (no auth)
+        continue-on-error: true
+        run: |
+          mkdir -p reports
+          python -m market_intelligence.public_stock_mcp_probe \
+            --directory data/research \
+            --date 2026-10-15 \
+            --output reports/public_stock_mcp_probe.json
+      - name: Install no-login TradingView datafeed
+        continue-on-error: true
+        run: |
+          python -m pip install git+https://github.com/stefanomorni/fork-tvdatafeed.git@1bca18686500b3131837a2c724d2e75fb1580adb
+      - name: Probe public TradingView 5m history (no login)
+        continue-on-error: true
+        env:
+          TZ: Asia/Kolkata
+        run: |
+          mkdir -p reports
+          python -m market_intelligence.tradingview_tvdatafeed_probe \
+            --directory data/research \
+            --symbol RELIANCE.NS \
+            --target-date 2026-10-15 \
+            --n-bars 5000 \
+            --output reports/tradingview_tvdatafeed_probe.json
+      - name: Compare yfinance history/download interfaces for recurring missing timestamps
+        run: |
+          mkdir -p reports
+          python market_intelligence/provider_probe.py \
+            --symbols RELIANCE.NS,TCS.NS,INFY.NS,HDFCBANK.NS,ICICIBANK.NS \
+            --start "${{ steps.dates.outputs.start }}" \
+            --end "${{ steps.dates.outputs.end }}" \
+            --session-end 15:15 \
+            --output reports/yahoo_provider_probe.json
+      - name: Compare Yahoo against independent Upstox source (optional token)
+        env:
+          UPSTOX_ACCESS_TOKEN: ${{ secrets.UPSTOX_ACCESS_TOKEN }}
+        run: |
+          python market_intelligence/provider_probe.py \
+            --independent-provider upstox \
+            --symbols RELIANCE.NS,TCS.NS,INFY.NS,HDFCBANK.NS,ICICIBANK.NS \
+            --start "${{ steps.dates.outputs.start }}" \
+            --end "${{ steps.dates.outputs.end }}" \
+            --yahoo-dir data/research \
+            --session-end 15:15 \
+            --output reports/independent_provider_probe.json
+      - name: Audit dataset completeness
+        continue-on-error: true
+        run: |
+          python main.py audit-research-data --directory data/research --interval 5 --session-end 15:15
+      - name: Run strategy filter diagnostics
+        run: |
+          mkdir -p reports
+          python main.py strategy-diagnostics \
+            --directory data/research \
+            --session-end 15:15 \
+            --report-json reports/strategy_diagnostics.json
+      - name: Enforce research completeness and acquisition gate
+        id: research_gate
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from market_intelligence.research_gate import evaluate_research_gate
+
+          audit_path = Path("data/research/completeness_audit.json")
+          manifest_path = Path("data/research/manifest.json")
+          audit = json.loads(audit_path.read_text(encoding="utf-8")) if audit_path.exists() else {
+              "eligible": False, "issues": ["completeness audit report was not generated"], "symbols": {}
+          }
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else None
+          gate = evaluate_research_gate(audit, manifest)
+          gate["audit_report"] = str(audit_path)
+          gate["manifest_file"] = str(manifest_path)
+          Path("reports").mkdir(exist_ok=True)
+          Path("reports/research_gate.json").write_text(json.dumps(gate, indent=2), encoding="utf-8")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"eligible={str(gate['eligible']).lower()}\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("## Chronological experiment eligibility\n\n")
+              summary.write(f"**Status:** {gate['status']}\n\n")
+              if gate["eligible"]:
+                  summary.write("Acquisition, candle validity, completeness, and cross-symbol synchronization passed. Experiments may run.\n")
+              else:
+                  summary.write("Experiments are skipped because acquisition or data-quality checks failed. No gaps are filled.\n\n")
+                  for issue in gate["issues"]:
+                      summary.write(f"- {issue}\n")
+          print(f"Research eligibility: {gate['status']}")
+          PY
+      - name: Run chronological experiments and cost stress tests
+        if: steps.research_gate.outputs.eligible == 'true'
+        shell: bash
+        run: |
+          mkdir -p reports
+          shopt -s nullglob
+          files=(data/research/*_5m.csv)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No datasets downloaded; preserving manifest and audit outputs."
+            exit 0
+          fi
+          failures=0
+          run_experiment() {
+            local report="$1"
+            shift
+            if python main.py research "$@" --session-end 15:15 --report-json "$report"; then
+              echo "Completed: $report"
+            else
+              rc=$?
+              echo "::error::Experiment failed (exit $rc): $report"
+              failures=$((failures + 1))
+            fi
+          }
+          for file in "${files[@]}"; do
+            symbol=$(basename "$file" "_5m.csv")
+            echo "=== Experiment: $symbol ==="
+            run_experiment "reports/${symbol}_base.json" --file "$file" --symbol "$symbol" --interval 5 --budget 8900
+            run_experiment "reports/${symbol}_stress_2x.json" --file "$file" --symbol "$symbol" --interval 5 --budget 8900 --slippage-bps 10 --fee-rate 0.0006
+            run_experiment "reports/${symbol}_stress_4x.json" --file "$file" --symbol "$symbol" --interval 5 --budget 8900 --slippage-bps 20 --fee-rate 0.0012
+          done
+          if [ "$failures" -gt 0 ]; then
+            echo "::error::$failures experiment report(s) failed; see logs and uploaded artifact."
+            exit 1
+          fi
+      - name: Upload research bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: intraday-research-${{ github.run_number }}
+          path: |
+            ai_intraday_agent_stage1/data/research/
+            ai_intraday_agent_stage1/reports/
+          if-no-files-found: warn
+          retention-days: 14

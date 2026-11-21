@@ -1,0 +1,49 @@
+import unittest
+
+from main import build_parser
+
+
+class Stage8CliTests(unittest.TestCase):
+    def test_audit_research_data_parser(self):
+        args = build_parser().parse_args([
+            "audit-research-data",
+            "--directory", "data/research",
+            "--interval", "5",
+            "--reference", "RELIANCE.NS_5m",
+        ])
+        self.assertEqual(args.cmd, "audit-research-data")
+        self.assertEqual(args.directory, "data/research")
+        self.assertEqual(args.interval, 5)
+        self.assertEqual(args.reference, "RELIANCE.NS_5m")
+        self.assertEqual(args.func.__name__, "cmd_audit_research_data")
+
+    def test_strategy_diagnostics_parser(self):
+        args = build_parser().parse_args([
+            "strategy-diagnostics",
+            "--directory", "data/research",
+            "--report-json", "reports/diagnostics.json",
+        ])
+        self.assertEqual(args.cmd, "strategy-diagnostics")
+        self.assertEqual(args.directory, "data/research")
+        self.assertEqual(args.report_json, "reports/diagnostics.json")
+        self.assertEqual(args.func.__name__, "cmd_strategy_diagnostics")
+
+    def test_fetch_research_data_parser(self):
+        args = build_parser().parse_args([
+            "fetch-research-data",
+            "--symbols", "RELIANCE.NS,TCS.NS",
+            "--interval", "5",
+            "--start-date", "2026-01-01",
+            "--end-date", "2026-02-01",
+            "--output-dir", "data/research",
+        ])
+        self.assertEqual(args.cmd, "fetch-research-data")
+        self.assertEqual(args.symbols, "RELIANCE.NS,TCS.NS")
+        self.assertEqual(args.interval, 5)
+        self.assertEqual(args.start_date, "2026-01-01")
+        self.assertEqual(args.end_date, "2026-02-01")
+        self.assertEqual(args.func.__name__, "cmd_fetch_research_data")
+
+
+if __name__ == "__main__":
+    unittest.main()
